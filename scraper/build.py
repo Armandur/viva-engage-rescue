@@ -29,7 +29,7 @@ CREATE TABLE messages (
     web_url TEXT, system_message INTEGER
 );
 CREATE TABLE attachments (
-    id INTEGER PRIMARY KEY, message_id INTEGER, type TEXT, name TEXT,
+    id INTEGER, message_id INTEGER, type TEXT, name TEXT,
     web_url TEXT, local_path TEXT
 );
 CREATE INDEX idx_messages_group ON messages(group_id);
@@ -54,7 +54,7 @@ def main() -> None:
     con = sqlite3.connect(DB)
     con.executescript(SCHEMA)
 
-    communities, users, messages, attachments = {}, {}, {}, []
+    communities, users, messages, attachments = {}, {}, {}, {}
 
     for g in json.loads((RAW / "groups.json").read_text(encoding="utf-8")):
         communities[g["id"]] = (
@@ -78,16 +78,16 @@ def main() -> None:
                 body.get("rich"), m.get("web_url"), 1 if m.get("system_message") else 0,
             )
             for a in m.get("attachments", []):
-                attachments.append((
+                attachments[(a.get("id"), m["id"])] = (
                     a.get("id"), m["id"], a.get("type"),
                     a.get("original_name") or a.get("name"),
                     a.get("web_url"), _local_path(a.get("id")) if a.get("type") != "ymodule" else None,
-                ))
+                )
 
     con.executemany("INSERT OR REPLACE INTO communities VALUES (?,?,?,?,?,?,0)", communities.values())
     con.executemany("INSERT OR REPLACE INTO users VALUES (?,?,?,?,?)", users.values())
     con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?)", messages.values())
-    con.executemany("INSERT INTO attachments VALUES (?,?,?,?,?,?)", attachments)
+    con.executemany("INSERT INTO attachments VALUES (?,?,?,?,?,?)", attachments.values())
 
     con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
     con.execute("UPDATE communities SET message_count = "

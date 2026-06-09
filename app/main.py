@@ -26,6 +26,9 @@ RAW = ROOT / "data" / "raw"
 ATT = ROOT / "data" / "attachments"
 ENV = ROOT / ".env"
 PIDFILE = ROOT / "data" / "run.pid"
+BUILDPID = ROOT / "data" / "build.pid"
+ARCHIVE_DB = ROOT / "data" / "archive.db"
+BUILD_LOG = ROOT / "data" / "build.log"
 LOGS = {
     "dump": ROOT / "data" / "dump.log",
     "update": ROOT / "data" / "dump.log",  # inkrementell skriver till samma logg
@@ -148,6 +151,32 @@ def _stop() -> None:
     PIDFILE.unlink(missing_ok=True)
 
 
+def _build_running() -> bool:
+    """Arkivbygget har egen spårning - får köra parallellt med en dump."""
+    if not BUILDPID.exists():
+        return False
+    try:
+        os.kill(int(BUILDPID.read_text()), 0)
+        return True
+    except (ProcessLookupError, ValueError):
+        BUILDPID.unlink(missing_ok=True)
+        return False
+    except PermissionError:
+        return True
+
+
+def _start_build() -> None:
+    if _build_running():
+        raise HTTPException(409, "ett bygge pågår redan")
+    log = BUILD_LOG.open("w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "scraper.build"],
+        cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    BUILDPID.write_text(str(proc.pid), encoding="utf-8")
+
+
 # ---- progress ----
 
 def _progress() -> dict:
@@ -234,7 +263,17 @@ def status():
         "running": run,
         "progress": _progress(),
         "log": _log_tail(run["kind"]) if run else _log_tail("dump"),
+        "archive": {
+            "built_at": ARCHIVE_DB.stat().st_mtime if ARCHIVE_DB.exists() else None,
+            "building": _build_running(),
+        },
     }
+
+
+@app.post("/build")
+def build():
+    _start_build()
+    return RedirectResponse("/", status_code=302)
 
 
 @app.post("/token")

@@ -49,6 +49,7 @@
     <div class="stats" id="stats"></div>
     <div style="margin-top:1rem" id="controls"></div>
     <div id="run-line" style="margin-top:.75rem"></div>
+    <div id="archive-line" style="margin-top:.75rem; border-top:1px solid #8883; padding-top:.75rem"></div>
   </div>
 
   <div class="card">
@@ -116,6 +117,14 @@ async function refresh() {
   }
   document.getElementById("controls").innerHTML = ctrl;
   document.getElementById("log").textContent = d.log || "-";
+
+  const a = d.archive || {};
+  const built = a.built_at ? new Date(a.built_at * 1000).toLocaleString() : "aldrig byggt";
+  document.getElementById("archive-line").innerHTML = a.building
+    ? `<span class="badge">bygger om arkivet…</span>`
+    : `Arkiv: senast byggt ${built}
+       <button class="sec" onclick="post('/build')">Bygg om arkivet</button>
+       <a href="/arkiv" style="margin-left:.5rem">öppna →</a>`;
 
   document.getElementById("rows").innerHTML = p.rows.map(r => {
     const c = r.status === "klar" ? "ok" : r.status === "hoppad" ? "skip" : "pend";
