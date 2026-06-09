@@ -122,19 +122,19 @@ async function refresh() {
   document.getElementById("log").textContent = d.log || "-";
 
   const th = d.threads;
-  const tl = document.getElementById("thread-line");
+  const tline = document.getElementById("thread-line");
   if (th) {
     const seen = th.done + th.skipped;
     const pct = th.total ? Math.floor((100 * seen) / th.total) : 0;
     const eta = th.eta_seconds != null ? fmtDur(th.eta_seconds) : "beräknar…";
     const rate = th.rate_per_min != null ? " · " + th.rate_per_min + "/min" : "";
-    tl.innerHTML =
+    tline.innerHTML =
       `<b>Trådkomplettering</b> ${th.done} / ${th.total} klara (${pct}%)` +
       (th.skipped ? ` · ${th.skipped} hoppade` : "") +
       ` · ETA ${eta}${rate}` +
       `<div class="bar"><i style="width:${pct}%"></i></div>`;
   } else {
-    tl.innerHTML = "";
+    tline.innerHTML = "";
   }
 
   const a = d.archive || {};
