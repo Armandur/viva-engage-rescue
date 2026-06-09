@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Viva Engage token-sync
 // @namespace    viva-engage-rescue
-// @version      1.2
+// @version      1.3
 // @description  Skickar din aktiva Viva Engage/Yammer-bearer-token till dump-panelen så fort webbläsaren förnyar den. Ingen credential lämnar din maskin utöver till din egen panel.
 // @match        https://*.yammer.com/*
 // @match        https://engage.cloud.microsoft/*
@@ -19,7 +19,7 @@
   const PANEL = "http://ubuntu-ai:8050";
 
   let lastSent = "";
-  const stat = { yammer: 0, other: 0, lastAud: "-", sent: "" };
+  const stat = { yammer: 0, other: 0, lastAud: "-", sent: "", store: 0 };
 
   function log() {
     console.debug("[viva-token-sync]", ...arguments);
@@ -96,6 +96,39 @@
     return origSet.apply(this, arguments);
   };
 
+  // Skanna webblagring efter en giltig, cachad Yammer-token (MSAL m.fl.).
+  function looksLikeJwt(s) {
+    return typeof s === "string" && s.split(".").length === 3 && s.length > 100;
+  }
+  function tryStored(s) {
+    if (!looksLikeJwt(s)) return;
+    let c;
+    try { c = decodeJwt(s); } catch (e) { return; }
+    if (String(c.aud || "").indexOf("yammer.com") === -1) return;
+    if (c.exp && c.exp * 1000 < Date.now() + 60000) return;  // utgången/snart
+    stat.store++;
+    stat.lastAud = String(c.aud).slice(0, 48);
+    log("Yammer-token i lagring, aud =", c.aud);
+    send(s);
+    paint();
+  }
+  function scanStorage() {
+    [localStorage, sessionStorage].forEach((store) => {
+      try {
+        for (let i = 0; i < store.length; i++) {
+          const v = store.getItem(store.key(i));
+          tryStored(v);
+          try {
+            const o = JSON.parse(v);
+            if (o && typeof o.secret === "string") tryStored(o.secret);  // MSAL-credential
+          } catch (e) {}
+        }
+      } catch (e) {}
+    });
+  }
+  scanStorage();
+  setInterval(scanStorage, 30000);
+
   // Statusruta nere till höger - visas direkt så du ser att scriptet kör.
   let el;
   function paint(msg, isError) {
@@ -113,10 +146,12 @@
       el.style.background = isError ? "#dc2626" : "#2563eb";
       return;
     }
-    el.style.background = stat.yammer ? "#16a34a" : "#2563eb";
+    el.style.background = (stat.yammer || stat.store) ? "#16a34a" : "#2563eb";
     el.textContent =
       "Viva-token-sync aktiv\n" +
-      "Yammer-token: " + stat.yammer + (stat.sent ? " (skickad " + stat.sent + ")" : "") + "\n" +
+      "Yammer-token: " + (stat.yammer + stat.store) +
+        " (nät " + stat.yammer + " / lagring " + stat.store + ")" +
+        (stat.sent ? "\nskickad " + stat.sent : "") + "\n" +
       "andra tokens: " + stat.other + "\n" +
       "senaste aud: " + stat.lastAud;
   }
