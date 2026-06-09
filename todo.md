@@ -18,6 +18,9 @@
 - [ ] IndexedDB-skanning i userscriptet är sista försöket till auto-fångst i nya
       Viva. Lyckas det inte: kör manuell inklistring (1-2 ggr räcker för full dump).
 - [ ] Ev. watchdog som auto-återupptar dumpen när färsk token finns i `.env`.
+- [ ] Ompröva inkrementellt läge (--update): det bygger på in_group, som inte är
+      en komplett trådfeed. För komplett uppdatering måste trådar med ny aktivitet
+      även backfillas om via in_thread. Nuvarande --update fångar inte allt.
 
 ## Klart
 - [x] Dump av alla communities med resume (.done/.cursor) och nätverks-retry.
