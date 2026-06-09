@@ -121,6 +121,21 @@ def thread(request: Request, thread_id: int):
     ):
         likes.setdefault(r["mid"], []).append(r["name"])
 
+    polls: dict[int, list[str]] = {}
+    for r in con.execute(
+        "SELECT p.message_id AS mid, p.answer FROM polls p JOIN messages m ON m.id = p.message_id "
+        "WHERE m.thread_id = ? ORDER BY p.option_index", (thread_id,)
+    ):
+        polls.setdefault(r["mid"], []).append(r["answer"])
+
+    # Slå upp tråden för delade inlägg så vi kan länka dit om vi har dem.
+    shared_links: dict[int, int] = {}
+    shared_ids = [m["shared_message_id"] for m in msgs if m["shared_message_id"]]
+    if shared_ids:
+        ph = ",".join("?" * len(shared_ids))
+        for r in con.execute(f"SELECT id, thread_id FROM messages WHERE id IN ({ph})", shared_ids):
+            shared_links[r["id"]] = r["thread_id"]
+
     group = con.execute(
         "SELECT c.id, c.full_name FROM messages m JOIN communities c ON c.id = m.group_id "
         "WHERE m.thread_id = ? LIMIT 1", (thread_id,)
@@ -139,4 +154,5 @@ def thread(request: Request, thread_id: int):
     return templates.TemplateResponse(request, "archive/thread.html", {
         "msgs": msgs, "atts": atts, "group": group,
         "mentions": mentions, "likes": likes, "depths": depths,
+        "polls": polls, "shared_links": shared_links,
     })

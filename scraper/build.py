@@ -27,8 +27,10 @@ CREATE TABLE users (
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY, group_id INTEGER, thread_id INTEGER, replied_to_id INTEGER,
     sender_id INTEGER, created_at TEXT, body_plain TEXT, body_rich TEXT,
-    web_url TEXT, system_message INTEGER, like_count INTEGER DEFAULT 0
+    web_url TEXT, system_message INTEGER, like_count INTEGER DEFAULT 0,
+    title TEXT, message_type TEXT, privacy TEXT, shared_message_id INTEGER
 );
+CREATE TABLE polls (message_id INTEGER, option_index INTEGER, answer TEXT);
 CREATE TABLE attachments (
     id INTEGER, message_id INTEGER, type TEXT, name TEXT,
     web_url TEXT, local_path TEXT
@@ -60,7 +62,7 @@ def main() -> None:
     con.executescript(SCHEMA)
 
     communities, users, messages, attachments = {}, {}, {}, {}
-    mentions, likes = {}, {}
+    mentions, likes, polls = {}, {}, {}
 
     for g in json.loads((RAW / "groups.json").read_text(encoding="utf-8")):
         communities[g["id"]] = (
@@ -87,13 +89,16 @@ def main() -> None:
                 m["id"], m.get("group_id"), m.get("thread_id"), m.get("replied_to_id"),
                 m.get("sender_id"), m.get("created_at"), body.get("plain"),
                 body.get("rich"), m.get("web_url"), 1 if m.get("system_message") else 0,
-                lb.get("count") or 0,
+                lb.get("count") or 0, m.get("title"), m.get("message_type"),
+                m.get("privacy"), m.get("shared_message_id"),
             )
             for uid in (m.get("notified_user_ids") or []):
                 mentions[(m["id"], uid)] = (m["id"], uid)
             for n in (lb.get("names") or []):
                 if n.get("user_id"):
                     likes[(m["id"], n["user_id"])] = (m["id"], n["user_id"])
+            for p in (m.get("poll_options") or []):
+                polls[(m["id"], p.get("option"))] = (m["id"], p.get("option"), p.get("answer"))
             for a in m.get("attachments", []):
                 attachments[(a.get("id"), m["id"])] = (
                     a.get("id"), m["id"], a.get("type"),
@@ -103,10 +108,11 @@ def main() -> None:
 
     con.executemany("INSERT OR REPLACE INTO communities VALUES (?,?,?,?,?,?,0)", communities.values())
     con.executemany("INSERT OR REPLACE INTO users VALUES (?,?,?,?,?,?,?,?,?,?)", users.values())
-    con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?)", messages.values())
+    con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", messages.values())
     con.executemany("INSERT INTO attachments VALUES (?,?,?,?,?,?)", attachments.values())
     con.executemany("INSERT INTO mentions VALUES (?,?)", mentions.values())
     con.executemany("INSERT INTO likes VALUES (?,?)", likes.values())
+    con.executemany("INSERT INTO polls VALUES (?,?,?)", polls.values())
 
     con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
     con.execute("UPDATE communities SET message_count = "

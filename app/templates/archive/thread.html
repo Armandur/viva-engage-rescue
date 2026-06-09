@@ -9,8 +9,27 @@
   <div class="card-body py-2">
     <div class="small text-secondary">
       {{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}{% if depth %} · svar{% endif %}
+      {% if m["message_type"] in ["announcement", "question"] %}
+        <span class="badge text-bg-info">{{ m["message_type"] }}</span>
+      {% endif %}
+      {% if m["privacy"] and m["privacy"] != "public" %}
+        <span class="badge text-bg-secondary">{{ m["privacy"] }}</span>
+      {% endif %}
     </div>
+    {% if m["title"] %}<div class="fw-semibold">{{ m["title"] }}</div>{% endif %}
+    {% if m["shared_message_id"] %}
+      <div class="small text-secondary">↪ delning av ett annat inlägg
+        {% if shared_links.get(m["shared_message_id"]) %}
+          (<a href="/arkiv/t/{{ shared_links[m['shared_message_id']] }}#m{{ m['shared_message_id'] }}">visa originalet</a>)
+        {% endif %}
+      </div>
+    {% endif %}
     <div class="body">{{ m["body_plain"] or "" }}</div>
+    {% if polls.get(m["id"]) %}
+      <div class="small mt-1"><b>Omröstning:</b>
+        <ul class="mb-0">{% for a in polls[m["id"]] %}<li>{{ a }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
     {% if mentions.get(m["id"]) %}
       <div class="small text-primary">@ {{ mentions[m["id"]]|join(", ") }}</div>
     {% endif %}
