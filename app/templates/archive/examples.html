@@ -1,0 +1,17 @@
+{% extends "archive/base.html" %}
+{% block title %}Exempel - Viva-arkiv{% endblock %}
+{% block content %}
+<h1 class="h4">Exempel på specialfall</h1>
+<p class="text-secondary">Direktlänkar till ett exempel av varje meddelandetyp/funktion - för att testa renderingen utan att leta.</p>
+<div class="list-group">
+  {% for c in cases %}
+  <a class="list-group-item list-group-item-action d-flex justify-content-between"
+     href="/arkiv/t/{{ c['tid'] }}#m{{ c['mid'] }}">
+    <span><b>{{ c["label"] }}</b> <span class="text-secondary">- {{ c["desc"] }}</span></span>
+    <span class="text-secondary">→</span>
+  </a>
+  {% else %}
+  <p>Inga exempel hittades (är arkivet byggt?).</p>
+  {% endfor %}
+</div>
+{% endblock %}

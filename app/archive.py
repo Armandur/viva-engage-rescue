@@ -43,6 +43,44 @@ def index(request: Request):
                                       {"communities": communities, "stats": stats})
 
 
+@router.get("/exempel", response_class=HTMLResponse)
+def examples(request: Request):
+    if not DB.exists():
+        return HTMLResponse("Arkivet är inte byggt än.")
+    con = _db()
+    cases = []
+
+    def one(label, desc, sql):
+        r = con.execute(sql).fetchone()
+        if r and r["thread_id"]:
+            cases.append({"label": label, "desc": desc,
+                          "tid": r["thread_id"], "mid": r["id"]})
+
+    one("Omröstning", "meddelande med svarsalternativ",
+        "SELECT m.thread_id, m.id FROM messages m JOIN polls p ON p.message_id = m.id LIMIT 1")
+    one("Delat inlägg (reshare)", "shared_message_id satt",
+        "SELECT thread_id, id FROM messages WHERE shared_message_id IS NOT NULL LIMIT 1")
+    one("Announcement", "message_type = announcement",
+        "SELECT thread_id, id FROM messages WHERE message_type = 'announcement' LIMIT 1")
+    one("Fråga", "message_type = question",
+        "SELECT thread_id, id FROM messages WHERE message_type = 'question' LIMIT 1")
+    one("Systemmeddelande", "message_type = system",
+        "SELECT thread_id, id FROM messages WHERE message_type = 'system' LIMIT 1")
+    one("Med rubrik", "title satt",
+        "SELECT thread_id, id FROM messages WHERE title IS NOT NULL LIMIT 1")
+    one("Arkiverad bilaga", "nedladdad fil lokalt",
+        "SELECT m.thread_id, m.id FROM messages m JOIN attachments a ON a.message_id = m.id "
+        "WHERE a.local_path IS NOT NULL LIMIT 1")
+    one("@-mention", "notified_user_ids",
+        "SELECT m.thread_id, m.id FROM messages m JOIN mentions mn ON mn.message_id = m.id LIMIT 1")
+    one("Mest gillade", "högst like_count",
+        "SELECT thread_id, id FROM messages ORDER BY like_count DESC LIMIT 1")
+    one("Längsta tråden", "flest meddelanden - djup nästling",
+        "SELECT thread_id, MIN(id) AS id FROM messages GROUP BY thread_id ORDER BY COUNT(*) DESC LIMIT 1")
+    con.close()
+    return templates.TemplateResponse(request, "archive/examples.html", {"cases": cases})
+
+
 @router.get("/sok", response_class=HTMLResponse)
 def search(request: Request, q: str = Query("")):
     hits = []
