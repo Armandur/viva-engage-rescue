@@ -27,15 +27,19 @@ CREATE TABLE users (
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY, group_id INTEGER, thread_id INTEGER, replied_to_id INTEGER,
     sender_id INTEGER, created_at TEXT, body_plain TEXT, body_rich TEXT,
-    web_url TEXT, system_message INTEGER
+    web_url TEXT, system_message INTEGER, like_count INTEGER DEFAULT 0
 );
 CREATE TABLE attachments (
     id INTEGER, message_id INTEGER, type TEXT, name TEXT,
     web_url TEXT, local_path TEXT
 );
+CREATE TABLE mentions (message_id INTEGER, user_id INTEGER);
+CREATE TABLE likes (message_id INTEGER, user_id INTEGER);
 CREATE INDEX idx_messages_group ON messages(group_id);
 CREATE INDEX idx_messages_thread ON messages(thread_id);
 CREATE INDEX idx_attachments_msg ON attachments(message_id);
+CREATE INDEX idx_mentions_msg ON mentions(message_id);
+CREATE INDEX idx_likes_msg ON likes(message_id);
 CREATE VIRTUAL TABLE messages_fts USING fts5(body_plain, content='messages', content_rowid='id');
 """
 
@@ -56,6 +60,7 @@ def main() -> None:
     con.executescript(SCHEMA)
 
     communities, users, messages, attachments = {}, {}, {}, {}
+    mentions, likes = {}, {}
 
     for g in json.loads((RAW / "groups.json").read_text(encoding="utf-8")):
         communities[g["id"]] = (
@@ -77,11 +82,18 @@ def main() -> None:
                 )
         for m in data.get("messages", []):
             body = m.get("body") or {}
+            lb = m.get("liked_by") or {}
             messages[m["id"]] = (
                 m["id"], m.get("group_id"), m.get("thread_id"), m.get("replied_to_id"),
                 m.get("sender_id"), m.get("created_at"), body.get("plain"),
                 body.get("rich"), m.get("web_url"), 1 if m.get("system_message") else 0,
+                lb.get("count") or 0,
             )
+            for uid in (m.get("notified_user_ids") or []):
+                mentions[(m["id"], uid)] = (m["id"], uid)
+            for n in (lb.get("names") or []):
+                if n.get("user_id"):
+                    likes[(m["id"], n["user_id"])] = (m["id"], n["user_id"])
             for a in m.get("attachments", []):
                 attachments[(a.get("id"), m["id"])] = (
                     a.get("id"), m["id"], a.get("type"),
@@ -91,8 +103,10 @@ def main() -> None:
 
     con.executemany("INSERT OR REPLACE INTO communities VALUES (?,?,?,?,?,?,0)", communities.values())
     con.executemany("INSERT OR REPLACE INTO users VALUES (?,?,?,?,?,?,?,?,?,?)", users.values())
-    con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?)", messages.values())
+    con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?)", messages.values())
     con.executemany("INSERT INTO attachments VALUES (?,?,?,?,?,?)", attachments.values())
+    con.executemany("INSERT INTO mentions VALUES (?,?)", mentions.values())
+    con.executemany("INSERT INTO likes VALUES (?,?)", likes.values())
 
     con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
     con.execute("UPDATE communities SET message_count = "

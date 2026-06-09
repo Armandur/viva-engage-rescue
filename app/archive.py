@@ -105,10 +105,38 @@ def thread(request: Request, thread_id: int):
         "WHERE m.thread_id = ?", (thread_id,)
     ).fetchall():
         atts.setdefault(a["message_id"], []).append(a)
+
+    mentions: dict[int, list[str]] = {}
+    for r in con.execute(
+        "SELECT mn.message_id AS mid, COALESCE(u.full_name, 'okänd') AS name "
+        "FROM mentions mn JOIN messages m ON m.id = mn.message_id "
+        "LEFT JOIN users u ON u.id = mn.user_id WHERE m.thread_id = ?", (thread_id,)
+    ):
+        mentions.setdefault(r["mid"], []).append(r["name"])
+    likes: dict[int, list[str]] = {}
+    for r in con.execute(
+        "SELECT lk.message_id AS mid, COALESCE(u.full_name, 'okänd') AS name "
+        "FROM likes lk JOIN messages m ON m.id = lk.message_id "
+        "LEFT JOIN users u ON u.id = lk.user_id WHERE m.thread_id = ?", (thread_id,)
+    ):
+        likes.setdefault(r["mid"], []).append(r["name"])
+
     group = con.execute(
         "SELECT c.id, c.full_name FROM messages m JOIN communities c ON c.id = m.group_id "
         "WHERE m.thread_id = ? LIMIT 1", (thread_id,)
     ).fetchone()
     con.close()
-    return templates.TemplateResponse(request, "archive/thread.html",
-                                      {"msgs": msgs, "atts": atts, "group": group})
+
+    # Nästlingsdjup ur replied_to_id-kedjan (begränsat till trådens egna meddelanden).
+    parent = {m["id"]: m["replied_to_id"] for m in msgs}
+    depths: dict[int, int] = {}
+    for mid in parent:
+        d, cur, seen = 0, parent[mid], set()
+        while cur and cur in parent and cur not in seen:
+            seen.add(cur); d += 1; cur = parent[cur]
+        depths[mid] = d
+
+    return templates.TemplateResponse(request, "archive/thread.html", {
+        "msgs": msgs, "atts": atts, "group": group,
+        "mentions": mentions, "likes": likes, "depths": depths,
+    })

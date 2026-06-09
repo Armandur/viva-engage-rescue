@@ -3,12 +3,20 @@
 {% block content %}
 {% if group %}<p><a href="/arkiv/c/{{ group['id'] }}">← {{ group["full_name"] }}</a></p>{% endif %}
 {% for m in msgs %}
-<div class="card mb-2 {% if m['replied_to_id'] %}border-start border-3{% endif %}" id="m{{ m['id'] }}">
+{% set depth = depths.get(m["id"], 0) %}
+<div class="card mb-2 lvl{{ [depth, 5]|min }}" id="m{{ m['id'] }}"
+     style="margin-left: {{ [depth, 6]|min * 1.5 }}rem">
   <div class="card-body py-2">
     <div class="small text-secondary">
-      {{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}{% if m["replied_to_id"] %} · svar{% endif %}
+      {{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}{% if depth %} · svar{% endif %}
     </div>
     <div class="body">{{ m["body_plain"] or "" }}</div>
+    {% if mentions.get(m["id"]) %}
+      <div class="small text-primary">@ {{ mentions[m["id"]]|join(", ") }}</div>
+    {% endif %}
+    {% if m["like_count"] %}
+      <div class="small">👍 {{ m["like_count"] }}{% if likes.get(m["id"]) %} - {{ likes[m["id"]]|join(", ") }}{% endif %}</div>
+    {% endif %}
     {% if atts.get(m["id"]) %}
       {% for a in atts[m["id"]] %}
       <div class="small mt-1">
