@@ -25,6 +25,8 @@
     .ok { color: #16a34a; } .pend { color: #ca8a04; } .skip { color: #dc2626; }
     .badge { padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; background: #8882; }
     .warn { color: #dc2626; font-weight: 600; }
+    .bar { background: #8883; border-radius: 6px; height: 14px; overflow: hidden; margin-top: .35rem; }
+    .bar > i { display: block; height: 100%; background: #16a34a; transition: width .4s; }
   </style>
 </head>
 <body>
@@ -49,6 +51,7 @@
     <div class="stats" id="stats"></div>
     <div style="margin-top:1rem" id="controls"></div>
     <div id="run-line" style="margin-top:.75rem"></div>
+    <div id="thread-line" style="margin-top:.75rem"></div>
     <div id="archive-line" style="margin-top:.75rem; border-top:1px solid #8883; padding-top:.75rem"></div>
   </div>
 
@@ -117,6 +120,22 @@ async function refresh() {
   }
   document.getElementById("controls").innerHTML = ctrl;
   document.getElementById("log").textContent = d.log || "-";
+
+  const th = d.threads;
+  const tl = document.getElementById("thread-line");
+  if (th) {
+    const seen = th.done + th.skipped;
+    const pct = th.total ? Math.floor((100 * seen) / th.total) : 0;
+    const eta = th.eta_seconds != null ? fmtDur(th.eta_seconds) : "beräknar…";
+    const rate = th.rate_per_min != null ? " · " + th.rate_per_min + "/min" : "";
+    tl.innerHTML =
+      `<b>Trådkomplettering</b> ${th.done} / ${th.total} klara (${pct}%)` +
+      (th.skipped ? ` · ${th.skipped} hoppade` : "") +
+      ` · ETA ${eta}${rate}` +
+      `<div class="bar"><i style="width:${pct}%"></i></div>`;
+  } else {
+    tl.innerHTML = "";
+  }
 
   const a = d.archive || {};
   const built = a.built_at ? new Date(a.built_at * 1000).toLocaleString() : "aldrig byggt";

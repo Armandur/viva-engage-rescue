@@ -10,10 +10,12 @@ gått ut. Token-byte gäller nästa körning (resume hoppar färdiga grupper).
 import base64
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 from fastapi import Body, FastAPI, Form, HTTPException
@@ -228,6 +230,50 @@ def _dir_size(p: Path) -> int:
     return total
 
 
+_THREADS_DIR = ROOT / "data" / "raw" / "threads"
+_thread_samples: deque = deque(maxlen=30)  # (tidpunkt, antal klara) för takt/ETA
+
+
+def _thread_total() -> int:
+    """Totalt antal kända trådar - parsas ur threads.log (skrivs vid start)."""
+    log = LOGS["threads"]
+    if log.exists():
+        m = re.search(r"(\d+) kända trådar", log.read_text(encoding="utf-8")[:400])
+        if m:
+            return int(m.group(1))
+    return 0
+
+
+def _thread_status() -> dict | None:
+    if not _THREADS_DIR.exists():
+        return None
+    done = skipped = 0
+    for d in _THREADS_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        if (d / ".done").exists():
+            done += 1
+        elif (d / ".skipped").exists():
+            skipped += 1
+    if done == 0 and skipped == 0:
+        return None
+    total = _thread_total() or (done + skipped)
+    now = time.time()
+    _thread_samples.append((now, done))
+    rate = eta = None
+    if len(_thread_samples) >= 2:
+        t0, d0 = _thread_samples[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt  # trådar/sek över mätfönstret
+            eta = int(max(total - done - skipped, 0) / rate)
+    return {
+        "total": total, "done": done, "skipped": skipped,
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
 def _log_tail(kind: str, n: int = 25) -> str:
     log = LOGS.get(kind)
     if not log or not log.exists():
@@ -267,6 +313,7 @@ def status():
             "built_at": ARCHIVE_DB.stat().st_mtime if ARCHIVE_DB.exists() else None,
             "building": _build_running(),
         },
+        "threads": _thread_status(),
     }
 
 
