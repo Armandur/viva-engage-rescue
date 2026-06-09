@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Viva Engage token-sync
 // @namespace    viva-engage-rescue
-// @version      1.0
+// @version      1.1
 // @description  Skickar din aktiva Viva Engage/Yammer-bearer-token till dump-panelen så fort webbläsaren förnyar den. Ingen credential lämnar din maskin utöver till din egen panel.
 // @match        https://*.yammer.com/*
 // @match        https://engage.cloud.microsoft/*
@@ -40,10 +40,24 @@
     });
   }
 
+  // Sant bara för token vars audience är Yammer-API:t (din webbläsare skickar
+  // även Graph-/SharePoint-tokens som vi inte vill posta).
+  function audIsYammer(tok) {
+    try {
+      let b64 = tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      const aud = JSON.parse(atob(b64)).aud || "";
+      return typeof aud === "string" && aud.indexOf("yammer.com") !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Plocka "Bearer <token>" ur valfri header-representation.
   function grab(value) {
     if (typeof value === "string" && value.indexOf("Bearer ") === 0) {
-      send(value.slice(7).trim());
+      const tok = value.slice(7).trim();
+      if (audIsYammer(tok)) send(tok);
     }
   }
   function scanHeaders(h) {

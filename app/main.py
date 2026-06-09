@@ -55,6 +55,21 @@ def _write_token(token: str) -> None:
     ENV.write_text("".join(f"{k}={v}\n" for k, v in env.items()), encoding="utf-8")
 
 
+def _aud(token: str):
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload)).get("aud")
+    except Exception:
+        return None
+
+
+def _is_yammer_token(token: str) -> bool:
+    """Avvisa bara token vars audience säkert pekar på fel resurs."""
+    aud = _aud(token)
+    return aud is None or "yammer.com" in str(aud)
+
+
 def _token_info() -> dict:
     token = _read_env().get("YAMMER_TOKEN", "")
     if not token:
@@ -215,6 +230,8 @@ def api_token(payload: dict = Body(...)):
     token = (payload.get("token") or "").strip()
     if not token:
         raise HTTPException(400, "token saknas")
+    if not _is_yammer_token(token):
+        raise HTTPException(400, f"fel resurs (aud={_aud(token)}) - inte en Yammer-API-token")
     _write_token(token)
     return {"ok": True}
 
