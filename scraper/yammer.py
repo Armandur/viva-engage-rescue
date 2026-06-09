@@ -4,7 +4,7 @@ import time
 
 import requests
 
-from .config import YAMMER_API_BASE, auth_headers
+from . import config
 
 # Legacy-API:t tål grovt 10 req/10s. 1.2s mellan anrop ger marginal.
 _MIN_INTERVAL = 1.2
@@ -35,29 +35,52 @@ _TRANSIENT = (
 )
 
 
-def get(path: str, **params) -> dict | list:
-    """GET mot API:t. Throttlar, backar av vid 429/nätverksfel, höjer TokenExpired vid 401."""
-    url = f"{YAMMER_API_BASE}/{path.lstrip('/')}"
-    for attempt in range(6):
+def _request(url: str, **params) -> requests.Response:
+    """Gör en GET med självläkande token: läser token färskt per anrop och
+    väntar in en ny (inklistrad i panelen) vid 401 i stället för att krascha.
+    Backar av vid 429/nätverksfel."""
+    net_fails = 0
+    while True:
         _throttle()
-        try:
-            resp = requests.get(url, headers=auth_headers(), params=params, timeout=60)
-            if resp.status_code == 401:
-                raise TokenExpired(f"401 på {path}")
-            if resp.status_code in (403, 404):
-                raise Forbidden(f"{resp.status_code} på {path}")
-            if resp.status_code == 429:
-                retry = int(resp.headers.get("Retry-After", 10))
-                print(f"  429 rate limit - väntar {retry}s (försök {attempt + 1}/6)")
-                time.sleep(retry)
+        tok = config.current_token()
+        if not tok:
+            print("  ingen token satt - väntar (klistra in i panelen)...")
+            if config.wait_for_fresh_token(""):
                 continue
-            resp.raise_for_status()
-            return resp.json()
+            raise TokenExpired("ingen token tillgänglig inom tidsgräns")
+        try:
+            resp = requests.get(url, headers={"Authorization": f"Bearer {tok}"},
+                                params=params, timeout=60)
         except _TRANSIENT as e:
-            wait = min(2 ** attempt, 30)
-            print(f"  nätverksfel ({type(e).__name__}) på {path} - nytt försök om {wait}s")
+            net_fails += 1
+            if net_fails > 6:
+                raise RuntimeError(f"Gav upp efter nätverksfel på {url}")
+            wait = min(2 ** net_fails, 30)
+            print(f"  nätverksfel ({type(e).__name__}) - nytt försök om {wait}s")
             time.sleep(wait)
-    raise RuntimeError(f"Gav upp efter upprepade fel på {path}")
+            continue
+        net_fails = 0
+        if resp.status_code == 401:
+            print("  token utgången - väntar på ny (klistra in i panelen)...")
+            if config.wait_for_fresh_token(tok):
+                print("  ny token mottagen - fortsätter")
+                continue
+            raise TokenExpired("401, ingen ny token inom tidsgräns")
+        if resp.status_code == 429:
+            retry = int(resp.headers.get("Retry-After", 10))
+            print(f"  429 rate limit - väntar {retry}s")
+            time.sleep(retry)
+            continue
+        return resp
+
+
+def get(path: str, **params) -> dict | list:
+    """GET mot API:t med självläkande token. Höjer Forbidden vid 403/404."""
+    resp = _request(f"{config.YAMMER_API_BASE}/{path.lstrip('/')}", **params)
+    if resp.status_code in (403, 404):
+        raise Forbidden(f"{resp.status_code} på {path}")
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _paginate_groups(**extra) -> list[dict]:
@@ -91,24 +114,14 @@ def iter_all_groups() -> list[dict]:
 
 
 def download(url: str, dest) -> str:
-    """Laddar ner en fil (bilaga) till dest. Returnerar content-type."""
-    for attempt in range(6):
-        _throttle()
-        try:
-            resp = requests.get(url, headers=auth_headers(), timeout=120, allow_redirects=True)
-            if resp.status_code == 401:
-                raise TokenExpired(f"401 vid nedladdning {url}")
-            if resp.status_code in (403, 404):
-                raise Forbidden(f"{resp.status_code} vid nedladdning {url}")
-            resp.raise_for_status()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(resp.content)
-            return resp.headers.get("content-type", "")
-        except _TRANSIENT as e:
-            wait = min(2 ** attempt, 30)
-            print(f"  nätverksfel ({type(e).__name__}) vid nedladdning - nytt försök om {wait}s")
-            time.sleep(wait)
-    raise RuntimeError(f"Gav upp efter upprepade fel vid nedladdning {url}")
+    """Laddar ner en fil (bilaga) till dest. Självläkande token. Returnerar content-type."""
+    resp = _request(url)
+    if resp.status_code in (403, 404):
+        raise Forbidden(f"{resp.status_code} vid nedladdning {url}")
+    resp.raise_for_status()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(resp.content)
+    return resp.headers.get("content-type", "")
 
 
 def iter_group_message_pages(group_id: int, older_than: int | None = None):
