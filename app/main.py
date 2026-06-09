@@ -35,6 +35,10 @@ LOGS = {
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app = FastAPI(title="Viva Engage-dump")
 
+from app.archive import router as archive_router  # noqa: E402
+
+app.include_router(archive_router)
+
 
 # ---- token ----
 

@@ -35,7 +35,7 @@ CREATE TABLE attachments (
 CREATE INDEX idx_messages_group ON messages(group_id);
 CREATE INDEX idx_messages_thread ON messages(thread_id);
 CREATE INDEX idx_attachments_msg ON attachments(message_id);
-CREATE VIRTUAL TABLE messages_fts USING fts5(body, content='');
+CREATE VIRTUAL TABLE messages_fts USING fts5(body_plain, content='messages', content_rowid='id');
 """
 
 
@@ -87,9 +87,7 @@ def main() -> None:
     con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?)", messages.values())
     con.executemany("INSERT INTO attachments VALUES (?,?,?,?,?,?)", attachments)
 
-    con.execute("DELETE FROM messages_fts")
-    con.execute("INSERT INTO messages_fts(rowid, body) "
-                "SELECT id, body_plain FROM messages WHERE body_plain IS NOT NULL")
+    con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
     con.execute("UPDATE communities SET message_count = "
                 "(SELECT COUNT(*) FROM messages WHERE messages.group_id = communities.id)")
     con.commit()

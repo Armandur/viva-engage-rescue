@@ -1,0 +1,28 @@
+{% extends "archive/base.html" %}
+{% block title %}Tråd - Viva-arkiv{% endblock %}
+{% block content %}
+{% if group %}<p><a href="/arkiv/c/{{ group['id'] }}">← {{ group["full_name"] }}</a></p>{% endif %}
+{% for m in msgs %}
+<div class="msg" id="m{{ m['id'] }}">
+  <div class="meta">{{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}
+    {% if m["replied_to_id"] %}· svar{% endif %}</div>
+  <div class="body">{{ m["body_plain"] or "" }}</div>
+  {% if atts.get(m["id"]) %}
+    {% for a in atts[m["id"]] %}
+    <div class="att">
+      📎
+      {% if a["local_path"] %}
+        <a href="/arkiv/fil/{{ a['local_path'] }}">{{ a["name"] }}</a> <span class="muted">(arkiverad)</span>
+      {% elif a["web_url"] %}
+        <a href="{{ a['web_url'] }}" rel="noopener">{{ a["name"] or a["web_url"] }}</a> <span class="muted">(länk)</span>
+      {% else %}
+        {{ a["name"] }}
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% else %}
+<p>Inga meddelanden i tråden.</p>
+{% endfor %}
+{% endblock %}

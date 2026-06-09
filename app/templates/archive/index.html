@@ -1,0 +1,13 @@
+{% extends "archive/base.html" %}
+{% block content %}
+<p class="muted">{{ stats["m"] }} meddelanden från {{ communities|length }} communities,
+  {{ stats["u"] }} användare.</p>
+<ul class="clean">
+  {% for c in communities %}
+  <li>
+    <a href="/arkiv/c/{{ c['id'] }}">{{ c["full_name"] }}</a>
+    <span class="muted">- {{ c["message_count"] }} meddelanden</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}
