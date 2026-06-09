@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from fastapi import Body, FastAPI, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
@@ -176,7 +176,20 @@ def _log_tail(kind: str, n: int = 25) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
+
+
+@app.get("/viva-token-sync.user.js")
+def userscript(request: Request):
+    """Serverar userscriptet (Tampermonkey installerar direkt från .user.js).
+
+    PANEL och @connect sätts till den adress panelen nåddes på, så scriptet
+    pekar rätt oavsett host/port."""
+    src = (ROOT / "browser" / "viva-token-sync.user.js").read_text(encoding="utf-8")
+    base = str(request.base_url).rstrip("/")
+    src = src.replace('"http://ubuntu-ai:8050"', f'"{base}"')
+    src = src.replace("@connect      ubuntu-ai", f"@connect      {request.url.hostname}")
+    return Response(src, media_type="text/javascript; charset=utf-8")
 
 
 @app.get("/api/status")

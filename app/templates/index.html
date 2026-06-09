@@ -32,8 +32,12 @@
 
   <div class="card">
     <div id="token-line">Laddar...</div>
+    <div style="margin-top:.5rem; font-size:.9rem">
+      <a href="/viva-token-sync.user.js">Installera token-sync (Tampermonkey)</a>
+      - matar panelen automatiskt från din webbläsare.
+    </div>
     <details style="margin-top:.5rem">
-      <summary>Klistra in ny token</summary>
+      <summary>Klistra in ny token manuellt</summary>
       <form method="post" action="/token" style="margin-top:.5rem">
         <textarea name="token" rows="4" placeholder="Klistra in bearer-token (utan 'Bearer ')"></textarea>
         <button type="submit" style="margin-top:.5rem">Spara token</button>
