@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import Body, FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -194,6 +194,16 @@ def status():
 def set_token(token: str = Form(...)):
     _write_token(token)
     return RedirectResponse("/", status_code=302)
+
+
+@app.post("/api/token")
+def api_token(payload: dict = Body(...)):
+    """Tar emot token programmatiskt (från userscriptet i webbläsaren)."""
+    token = (payload.get("token") or "").strip()
+    if not token:
+        raise HTTPException(400, "token saknas")
+    _write_token(token)
+    return {"ok": True}
 
 
 @app.post("/start/{kind}")

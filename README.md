@@ -39,6 +39,18 @@ uv run python -m scraper.spike
 Förväntad output: vem du är inloggad som, ditt nätverk, en lista över dina
 communities och första sidan meddelanden i den första.
 
+## Token-sync (Tampermonkey)
+
+Device code-inloggning är blockerad av Conditional Access, så token måste komma
+från en webbläsare på en godkänd enhet. `browser/viva-token-sync.user.js` är ett
+userscript som fångar din aktiva bearer-token och postar den till panelen
+(`/api/token`) så fort webbläsaren förnyar den (~var 75:e min medan en Viva-flik
+är öppen). Då hålls dumpen igång utan manuell inklistring.
+
+1. Installera Tampermonkey, lägg till scriptet.
+2. Justera `PANEL`-konstanten om panelen inte kör på `http://ubuntu-ai:8050`.
+3. Öppna Viva Engage - en grön ruta nere till höger bekräftar att token skickats.
+
 ## Planerad struktur
 
 ```
