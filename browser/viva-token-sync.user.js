@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Viva Engage token-sync
 // @namespace    viva-engage-rescue
-// @version      1.3
+// @version      1.4
 // @description  Skickar din aktiva Viva Engage/Yammer-bearer-token till dump-panelen så fort webbläsaren förnyar den. Ingen credential lämnar din maskin utöver till din egen panel.
 // @match        https://*.yammer.com/*
 // @match        https://engage.cloud.microsoft/*
@@ -128,6 +128,49 @@
   }
   scanStorage();
   setInterval(scanStorage, 30000);
+
+  // Tidsboxad skanning av IndexedDB (MSAL kan cacha token där). Körs ett fåtal
+  // gånger, inte i evig loop - async och potentiellt tungt.
+  async function scanIndexedDB() {
+    if (!indexedDB.databases) return;
+    let dbs;
+    try { dbs = await indexedDB.databases(); } catch (e) { return; }
+    for (const info of dbs) {
+      if (!info.name) continue;
+      await new Promise((res) => {
+        let req;
+        try { req = indexedDB.open(info.name); } catch (e) { return res(); }
+        req.onerror = () => res();
+        req.onsuccess = () => {
+          const db = req.result;
+          const stores = Array.from(db.objectStoreNames);
+          if (!stores.length) { db.close(); return res(); }
+          let pending = stores.length;
+          const done = () => { if (--pending === 0) { db.close(); res(); } };
+          let tx;
+          try { tx = db.transaction(stores, "readonly"); } catch (e) { db.close(); return res(); }
+          stores.forEach((name) => {
+            const g = tx.objectStore(name).getAll();
+            g.onerror = done;
+            g.onsuccess = () => {
+              (g.result || []).forEach((v) => {
+                if (typeof v === "string") tryStored(v);
+                else if (v && typeof v === "object") {
+                  if (typeof v.secret === "string") tryStored(v.secret);
+                  Object.values(v).forEach((x) => { if (typeof x === "string") tryStored(x); });
+                }
+              });
+              done();
+            };
+          });
+        };
+      });
+    }
+    paint();
+  }
+  scanIndexedDB();
+  setTimeout(scanIndexedDB, 8000);
+  setTimeout(scanIndexedDB, 30000);
 
   // Statusruta nere till höger - visas direkt så du ser att scriptet kör.
   let el;
