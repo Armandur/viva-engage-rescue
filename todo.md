@@ -15,6 +15,12 @@
       så nära nedstängningen som möjligt (bygget dedupar på id och tar senaste
       rådata). (Rasmus 2026-06-09)
 
+## Strukturera befintlig rådata (ingen ny hämtning)
+- [ ] @-mentions: bygg tabell message_id -> user_id ur `notified_user_ids`
+      (finns även i body.rich som data-yammer-object='user:ID').
+- [ ] Likes: bygg tabell ur `liked_by` (antal + vilka som gillat).
+- [ ] Visa mentions/likes i trådvyn. (Rasmus 2026-06-09)
+
 ## Huvudleverans
 - [ ] Sökbart arkiv: läs `data/raw/` -> SQLite + FTS5 (dedup på message-id),
       tabeller för communities/users/messages/attachments.
@@ -30,9 +36,9 @@
       (Önskemål från Rasmus 2026-06-09.)
 
 ## Token / drift
-- [ ] IndexedDB-skanning i userscriptet är sista försöket till auto-fångst i nya
-      Viva. Lyckas det inte: kör manuell inklistring (1-2 ggr räcker för full dump).
-- [ ] Ev. watchdog som auto-återupptar dumpen när färsk token finns i `.env`.
+- [x] Token-fångst löst: userscript v1.7 hookar sidans fetch (unsafeWindow) och
+      matar panelen automatiskt; self-heal-klienten läser .env per anrop. Hands-off
+      så länge en Viva-flik är öppen. (Verifierat 2026-06-09 - 42 token fångade)
 - [ ] Ompröva inkrementellt läge (--update): det bygger på in_group, som inte är
       en komplett trådfeed. För komplett uppdatering måste trådar med ny aktivitet
       även backfillas om via in_thread. Nuvarande --update fångar inte allt.
