@@ -1,0 +1,16 @@
+# Hemligheter
+.env
+
+# Data och nedladdat innehåll
+data/
+raw/
+attachments/
+
+# Gemini-output
+tmp/gemini/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
