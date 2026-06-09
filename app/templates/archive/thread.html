@@ -3,24 +3,27 @@
 {% block content %}
 {% if group %}<p><a href="/arkiv/c/{{ group['id'] }}">← {{ group["full_name"] }}</a></p>{% endif %}
 {% for m in msgs %}
-<div class="msg" id="m{{ m['id'] }}">
-  <div class="meta">{{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}
-    {% if m["replied_to_id"] %}· svar{% endif %}</div>
-  <div class="body">{{ m["body_plain"] or "" }}</div>
-  {% if atts.get(m["id"]) %}
-    {% for a in atts[m["id"]] %}
-    <div class="att">
-      📎
-      {% if a["local_path"] %}
-        <a href="/arkiv/fil/{{ a['local_path'] }}">{{ a["name"] }}</a> <span class="muted">(arkiverad)</span>
-      {% elif a["web_url"] %}
-        <a href="{{ a['web_url'] }}" rel="noopener">{{ a["name"] or a["web_url"] }}</a> <span class="muted">(länk)</span>
-      {% else %}
-        {{ a["name"] }}
-      {% endif %}
+<div class="card mb-2 {% if m['replied_to_id'] %}border-start border-3{% endif %}" id="m{{ m['id'] }}">
+  <div class="card-body py-2">
+    <div class="small text-secondary">
+      {{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}{% if m["replied_to_id"] %} · svar{% endif %}
     </div>
-    {% endfor %}
-  {% endif %}
+    <div class="body">{{ m["body_plain"] or "" }}</div>
+    {% if atts.get(m["id"]) %}
+      {% for a in atts[m["id"]] %}
+      <div class="small mt-1">
+        📎
+        {% if a["local_path"] %}
+          <a href="/arkiv/fil/{{ a['local_path'] }}">{{ a["name"] }}</a> <span class="text-secondary">(arkiverad)</span>
+        {% elif a["web_url"] %}
+          <a href="{{ a['web_url'] }}" rel="noopener">{{ a["name"] or a["web_url"] }}</a> <span class="text-secondary">(länk)</span>
+        {% else %}
+          {{ a["name"] }}
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
 </div>
 {% else %}
 <p>Inga meddelanden i tråden.</p>

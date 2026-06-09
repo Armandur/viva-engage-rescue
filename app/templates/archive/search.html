@@ -1,19 +1,21 @@
 {% extends "archive/base.html" %}
 {% block content %}
 {% if q %}
-  <p class="muted">{{ hits|length }} träffar för "{{ q }}"{% if hits|length == 200 %} (visar de 200 mest relevanta){% endif %}</p>
+  <p class="text-secondary">{{ hits|length }} träffar för "{{ q }}"{% if hits|length == 200 %} (visar de 200 mest relevanta){% endif %}</p>
   {% for h in hits %}
-  <div class="card">
-    <div class="muted">
-      {{ h["community"] }} · {{ h["sender"] or "Okänd" }} · {{ h["created_at"] }}
+  <div class="card mb-2">
+    <div class="card-body py-2">
+      <div class="small text-secondary">
+        {{ h["community"] }} · {{ h["sender"] or "Okänd" }} · {{ h["created_at"] }}
+      </div>
+      <div class="body">{{ h["snip"]|safe }}</div>
+      <a href="/arkiv/t/{{ h['thread_id'] }}#m{{ h['id'] }}">Visa i tråden →</a>
     </div>
-    <div class="body">{{ h["snip"]|safe }}</div>
-    <a href="/arkiv/t/{{ h['thread_id'] }}#m{{ h['id'] }}">Visa i tråden →</a>
   </div>
   {% else %}
   <p>Inga träffar.</p>
   {% endfor %}
 {% else %}
-  <p class="muted">Skriv något i sökrutan.</p>
+  <p class="text-secondary">Skriv något i sökrutan.</p>
 {% endif %}
 {% endblock %}

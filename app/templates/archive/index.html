@@ -1,13 +1,14 @@
 {% extends "archive/base.html" %}
 {% block content %}
-<p class="muted">{{ stats["m"] }} meddelanden från {{ communities|length }} communities,
+<p class="text-secondary">{{ stats["m"] }} meddelanden från {{ communities|length }} communities,
   {{ stats["u"] }} användare.</p>
-<ul class="clean">
+<div class="list-group">
   {% for c in communities %}
-  <li>
-    <a href="/arkiv/c/{{ c['id'] }}">{{ c["full_name"] }}</a>
-    <span class="muted">- {{ c["message_count"] }} meddelanden</span>
-  </li>
+  <a class="list-group-item list-group-item-action d-flex justify-content-between"
+     href="/arkiv/c/{{ c['id'] }}">
+    <span>{{ c["full_name"] }}</span>
+    <span class="badge text-bg-secondary rounded-pill">{{ c["message_count"] }}</span>
+  </a>
   {% endfor %}
-</ul>
+</div>
 {% endblock %}

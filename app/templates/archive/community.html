@@ -1,19 +1,17 @@
 {% extends "archive/base.html" %}
 {% block title %}{{ info["full_name"] if info else "Community" }} - Viva-arkiv{% endblock %}
 {% block content %}
-<h1 style="font-size:1.3rem">{{ info["full_name"] if info else "Community" }}</h1>
-{% if info and info["description"] %}<p class="muted">{{ info["description"] }}</p>{% endif %}
-<p class="muted">{{ threads|length }} trådar</p>
-<ul class="clean">
+<h1 class="h4">{{ info["full_name"] if info else "Community" }}</h1>
+{% if info and info["description"] %}<p class="text-secondary">{{ info["description"] }}</p>{% endif %}
+<p class="text-secondary">{{ threads|length }} trådar</p>
+<div class="list-group">
   {% for t in threads %}
-  <li>
-    <a href="/arkiv/t/{{ t['thread_id'] }}">
-      {{ (t["starter"] or "(trådstart saknas i dumpen)")|truncate(110) }}
-    </a>
-    <div class="muted">
+  <a class="list-group-item list-group-item-action" href="/arkiv/t/{{ t['thread_id'] }}">
+    <div>{{ (t["starter"] or "(trådstart saknas i dumpen)")|truncate(110) }}</div>
+    <small class="text-secondary">
       {{ t["starter_by"] or "Okänd" }} · {{ t["n"] }} inlägg · senast {{ t["last_at"] }}
-    </div>
-  </li>
+    </small>
+  </a>
   {% endfor %}
-</ul>
+</div>
 {% endblock %}
