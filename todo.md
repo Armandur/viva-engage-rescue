@@ -1,5 +1,20 @@
 # Att göra
 
+## Datatäckning att utöka
+- [ ] **Full användarmetadata.** Meddelande-feeden ger redan name (handle), avatar
+      (mugshot_url), state, aad_guest, activated_at - lagras nu. Återstår: hämta
+      komplett medlemslista via `/users.json` och full profil via `/users/{id}.json`
+      (ort, avdelning, bio m.m.), samt ladda ner avatarer lokalt. (Rasmus 2026-06-09)
+- [ ] **Användares egna flöden ("Storylines").** Viva Engage har personliga flöden
+      likt en vägg där användare publicerar utanför communities. Hämta dessa
+      (sannolikt `messages/from_user/{id}` eller storyline-API - undersök) så även
+      de inläggen/kommentarerna arkiveras. (Rasmus 2026-06-09)
+- [ ] **Redigerade inlägg/kommentarer.** API:t ger bara aktuell text, ingen
+      edited_at och ingen historik - redigeringshistorik går alltså inte att fånga.
+      Sluttillståndet fångas däremot genom att köra hela pipelinen en sista gång
+      så nära nedstängningen som möjligt (bygget dedupar på id och tar senaste
+      rådata). (Rasmus 2026-06-09)
+
 ## Huvudleverans
 - [ ] Sökbart arkiv: läs `data/raw/` -> SQLite + FTS5 (dedup på message-id),
       tabeller för communities/users/messages/attachments.

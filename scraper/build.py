@@ -21,7 +21,8 @@ CREATE TABLE communities (
     privacy TEXT, created_at TEXT, web_url TEXT, message_count INTEGER DEFAULT 0
 );
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY, full_name TEXT, email TEXT, job_title TEXT, web_url TEXT
+    id INTEGER PRIMARY KEY, full_name TEXT, name TEXT, email TEXT, job_title TEXT,
+    web_url TEXT, mugshot_url TEXT, state TEXT, aad_guest INTEGER, activated_at TEXT
 );
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY, group_id INTEGER, thread_id INTEGER, replied_to_id INTEGER,
@@ -68,8 +69,12 @@ def main() -> None:
         data = json.loads(page.read_text(encoding="utf-8"))
         for r in data.get("references", []):
             if r.get("type") == "user" and r["id"] not in users:
-                users[r["id"]] = (r["id"], r.get("full_name") or r.get("name"),
-                                  r.get("email"), r.get("job_title"), r.get("web_url"))
+                users[r["id"]] = (
+                    r["id"], r.get("full_name") or r.get("name"), r.get("name"),
+                    r.get("email"), r.get("job_title"), r.get("web_url"),
+                    r.get("mugshot_url"), r.get("state"),
+                    1 if r.get("aad_guest") else 0, r.get("activated_at"),
+                )
         for m in data.get("messages", []):
             body = m.get("body") or {}
             messages[m["id"]] = (
@@ -85,7 +90,7 @@ def main() -> None:
                 )
 
     con.executemany("INSERT OR REPLACE INTO communities VALUES (?,?,?,?,?,?,0)", communities.values())
-    con.executemany("INSERT OR REPLACE INTO users VALUES (?,?,?,?,?)", users.values())
+    con.executemany("INSERT OR REPLACE INTO users VALUES (?,?,?,?,?,?,?,?,?,?)", users.values())
     con.executemany("INSERT OR REPLACE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?)", messages.values())
     con.executemany("INSERT INTO attachments VALUES (?,?,?,?,?,?)", attachments.values())
 
