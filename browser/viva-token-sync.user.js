@@ -1,15 +1,14 @@
 // ==UserScript==
 // @name         Viva Engage token-sync
 // @namespace    viva-engage-rescue
-// @version      1.1
+// @version      1.2
 // @description  Skickar din aktiva Viva Engage/Yammer-bearer-token till dump-panelen så fort webbläsaren förnyar den. Ingen credential lämnar din maskin utöver till din egen panel.
 // @match        https://*.yammer.com/*
 // @match        https://engage.cloud.microsoft/*
 // @match        https://*.engage.cloud.microsoft/*
+// @match        https://web.yammer.com/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
 // @connect      ubuntu-ai
 // ==/UserScript==
 
@@ -20,6 +19,11 @@
   const PANEL = "http://ubuntu-ai:8050";
 
   let lastSent = "";
+  const stat = { yammer: 0, other: 0, lastAud: "-", sent: "" };
+
+  function log() {
+    console.debug("[viva-token-sync]", ...arguments);
+  }
 
   function send(token) {
     if (!token || token === lastSent) return;
@@ -30,36 +34,44 @@
       headers: { "Content-Type": "application/json" },
       data: JSON.stringify({ token: token }),
       onload: function (r) {
-        if (r.status === 200) banner("Token skickad till panelen " + new Date().toLocaleTimeString());
-        else banner("Panelen svarade " + r.status, true);
+        if (r.status === 200) { stat.sent = new Date().toLocaleTimeString(); paint(); }
+        else { paint("Panelen svarade " + r.status, true); }
+        log("POST /api/token ->", r.status, r.responseText);
       },
       onerror: function () {
-        banner("Når inte panelen (" + PANEL + ")", true);
-        lastSent = "";  // tillåt nytt försök
+        paint("Når inte panelen (" + PANEL + ")", true);
+        lastSent = "";
       },
     });
   }
 
-  // Sant bara för token vars audience är Yammer-API:t (din webbläsare skickar
-  // även Graph-/SharePoint-tokens som vi inte vill posta).
-  function audIsYammer(tok) {
-    try {
-      let b64 = tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-      while (b64.length % 4) b64 += "=";
-      const aud = JSON.parse(atob(b64)).aud || "";
-      return typeof aud === "string" && aud.indexOf("yammer.com") !== -1;
-    } catch (e) {
-      return false;
-    }
+  // UTF-8-säker avkodning av JWT-payload.
+  function decodeJwt(tok) {
+    let b64 = tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder("utf-8").decode(bytes));
   }
 
-  // Plocka "Bearer <token>" ur valfri header-representation.
+  // Hantera en sedd "Bearer <token>".
   function grab(value) {
-    if (typeof value === "string" && value.indexOf("Bearer ") === 0) {
-      const tok = value.slice(7).trim();
-      if (audIsYammer(tok)) send(tok);
+    if (typeof value !== "string" || value.indexOf("Bearer ") !== 0) return;
+    const tok = value.slice(7).trim();
+    let aud = "(odekodbar)";
+    try { aud = decodeJwt(tok).aud || "(ingen aud)"; } catch (e) {}
+    stat.lastAud = String(aud).slice(0, 48);
+    if (String(aud).indexOf("yammer.com") !== -1) {
+      stat.yammer++;
+      log("Yammer-token, aud =", aud);
+      send(tok);
+    } else {
+      stat.other++;
+      log("annan token, aud =", aud);
     }
+    paint();
   }
+
   function scanHeaders(h) {
     try {
       if (!h) return;
@@ -69,7 +81,6 @@
     } catch (e) {}
   }
 
-  // Hooka fetch.
   const origFetch = window.fetch;
   window.fetch = function (input, init) {
     try {
@@ -79,25 +90,37 @@
     return origFetch.apply(this, arguments);
   };
 
-  // Hooka XHR.
   const origSet = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
     try { if (String(k).toLowerCase() === "authorization") grab(v); } catch (e) {}
     return origSet.apply(this, arguments);
   };
 
-  // Liten statusindikator längst ner till höger.
+  // Statusruta nere till höger - visas direkt så du ser att scriptet kör.
   let el;
-  function banner(text, isError) {
+  function paint(msg, isError) {
     if (!el) {
+      if (!document.body) { setTimeout(() => paint(msg, isError), 200); return; }
       el = document.createElement("div");
       el.style.cssText =
         "position:fixed;bottom:12px;right:12px;z-index:99999;padding:6px 10px;" +
-        "font:12px system-ui,sans-serif;border-radius:6px;color:#fff;opacity:.9;" +
-        "box-shadow:0 1px 4px #0006;pointer-events:none";
-      (document.body || document.documentElement).appendChild(el);
+        "font:12px/1.4 system-ui,sans-serif;border-radius:6px;color:#fff;opacity:.92;" +
+        "box-shadow:0 1px 4px #0006;max-width:320px;white-space:pre-line";
+      document.body.appendChild(el);
     }
-    el.textContent = "Viva-token-sync: " + text;
-    el.style.background = isError ? "#dc2626" : "#16a34a";
+    if (msg) {
+      el.textContent = "Viva-token-sync: " + msg;
+      el.style.background = isError ? "#dc2626" : "#2563eb";
+      return;
+    }
+    el.style.background = stat.yammer ? "#16a34a" : "#2563eb";
+    el.textContent =
+      "Viva-token-sync aktiv\n" +
+      "Yammer-token: " + stat.yammer + (stat.sent ? " (skickad " + stat.sent + ")" : "") + "\n" +
+      "andra tokens: " + stat.other + "\n" +
+      "senaste aud: " + stat.lastAud;
   }
+
+  paint();
+  log("aktivt på", location.href);
 })();
