@@ -176,8 +176,21 @@ def _progress() -> dict:
     return {
         "groups_total": total, "done": done, "skipped": skipped,
         "in_progress": in_progress, "pages": pages, "attachments": attachments,
+        "bytes_raw": _dir_size(RAW), "bytes_attachments": _dir_size(ATT),
         "rows": sorted(rows, key=lambda r: r["pages"], reverse=True),
     }
+
+
+def _dir_size(p: Path) -> int:
+    total = 0
+    if p.exists():
+        for f in p.rglob("*"):
+            if f.is_file():
+                try:
+                    total += f.stat().st_size
+                except OSError:
+                    pass
+    return total
 
 
 def _log_tail(kind: str, n: int = 25) -> str:

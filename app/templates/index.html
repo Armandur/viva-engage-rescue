@@ -73,6 +73,13 @@ function fmtDur(s) {
   const m = Math.floor(s / 60);
   return m + " min " + (s % 60) + " s";
 }
+function fmtBytes(b) {
+  if (!b) return "0 B";
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i ? 1 : 0) + " " + u[i];
+}
 async function refresh() {
   let d;
   try { d = await (await fetch("/api/status")).json(); }
@@ -92,7 +99,9 @@ async function refresh() {
     <div class="stat"><b>${p.done}/${p.groups_total}</b><span>grupper klara</span></div>
     <div class="stat"><b>${p.pages}</b><span>sidor hämtade</span></div>
     <div class="stat"><b>${p.skipped}</b><span>hoppade (ingen åtkomst)</span></div>
-    <div class="stat"><b>${p.attachments}</b><span>bilagor</span></div>`;
+    <div class="stat"><b>${p.attachments}</b><span>bilagor</span></div>
+    <div class="stat"><b>${fmtBytes(p.bytes_raw)}</b><span>rådata</span></div>
+    <div class="stat"><b>${fmtBytes(p.bytes_attachments)}</b><span>bilagor på disk</span></div>`;
 
   const running = d.running;
   let ctrl;
