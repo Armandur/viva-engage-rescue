@@ -97,7 +97,8 @@ async function refresh() {
             <button class="sec" onclick="post('/stop')">Stoppa</button>`;
   } else {
     ctrl = `<button onclick="post('/start/dump')">Starta/återuppta dump</button>
-            <button onclick="post('/start/download')">Ladda ner bilagor</button>`;
+            <button class="sec" onclick="post('/start/update')">Uppdatera (hämta nya)</button>
+            <button class="sec" onclick="post('/start/download')">Ladda ner bilagor</button>`;
   }
   document.getElementById("controls").innerHTML = ctrl;
   document.getElementById("log").textContent = d.log || "-";

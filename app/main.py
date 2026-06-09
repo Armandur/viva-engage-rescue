@@ -26,7 +26,11 @@ RAW = ROOT / "data" / "raw"
 ATT = ROOT / "data" / "attachments"
 ENV = ROOT / ".env"
 PIDFILE = ROOT / "data" / "run.pid"
-LOGS = {"dump": ROOT / "data" / "dump.log", "download": ROOT / "data" / "download.log"}
+LOGS = {
+    "dump": ROOT / "data" / "dump.log",
+    "update": ROOT / "data" / "dump.log",  # inkrementell skriver till samma logg
+    "download": ROOT / "data" / "download.log",
+}
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app = FastAPI(title="Viva Engage-dump")
@@ -86,8 +90,15 @@ def _running() -> dict | None:
         return data  # finns men ägs av annan - betrakta som körande
 
 
+_COMMANDS = {
+    "dump": ["scraper.dump"],
+    "update": ["scraper.dump", "--update"],
+    "download": ["scraper.download"],
+}
+
+
 def _start(kind: str) -> None:
-    if kind not in ("dump", "download"):
+    if kind not in _COMMANDS:
         raise HTTPException(400, "okänd körningstyp")
     if _running():
         raise HTTPException(409, "en körning pågår redan")
@@ -96,7 +107,7 @@ def _start(kind: str) -> None:
     log = LOGS[kind].open("w", encoding="utf-8")
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen(
-        [sys.executable, "-m", f"scraper.{kind}"],
+        [sys.executable, "-m", *_COMMANDS[kind]],
         cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, env=env,
     )
     PIDFILE.write_text(
