@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         Viva Engage token-sync
 // @namespace    viva-engage-rescue
-// @version      1.5
-// @description  Skickar din aktiva Viva Engage/Yammer-bearer-token till dump-panelen så fort webbläsaren förnyar den. Ingen credential lämnar din maskin utöver till din egen panel.
+// @version      1.6
+// @description  Hämtar din aktiva Yammer-aud-token via MSAL (acquireTokenSilent) och skickar den till dump-panelen. MSAL sköter förnyelse, så token hålls färsk automatiskt. Ingen credential lämnar din maskin utöver till din egen panel.
 // @match        https://*.yammer.com/*
 // @match        https://engage.cloud.microsoft/*
 // @match        https://*.engage.cloud.microsoft/*
 // @match        https://web.yammer.com/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      ubuntu-ai
 // ==/UserScript==
 
@@ -18,11 +19,12 @@
   // Panelens adress. Ändra om du kör den på annan host/port.
   const PANEL = "http://ubuntu-ai:8050";
 
-  // Slå av om Viva börjar bråka - då används bara nät/lagring/IDB-fångst.
-  const ENABLE_WORKER_HOOK = true;
+  // Yammer-API-token identifieras av dessa MSAL-scopes.
+  const YAMMER_SCOPES = ["https://www.yammer.com/access_as_user"];
+  const PAGE = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 
   let lastSent = "";
-  const stat = { yammer: 0, other: 0, lastAud: "-", sent: "", store: 0, worker: 0 };
+  const stat = { yammer: 0, other: 0, lastAud: "-", sent: "", store: 0, msal: 0 };
 
   function log() {
     console.debug("[viva-token-sync]", ...arguments);
@@ -99,36 +101,43 @@
     return origSet.apply(this, arguments);
   };
 
-  // Web Worker-hook: yammer-token används i worker-fetch (t.ex. /api/v2/events)
-  // som huvudtrådens hooks inte ser. Wrappa workern så dess fetch rapporterar
-  // Authorization via en BroadcastChannel (stör inte Vivas eget postMessage).
-  if (ENABLE_WORKER_HOOK && typeof Worker !== "undefined" && typeof BroadcastChannel !== "undefined") {
-    try {
-      const bc = new BroadcastChannel("viva-token-sync");
-      bc.onmessage = (e) => { if (e.data) { stat.worker++; grab("Bearer " + e.data); } };
-      const Orig = window.Worker;
-      window.Worker = function (url, opts) {
-        if (opts && opts.type === "module") return new Orig(url, opts);  // importScripts stöds ej
-        try {
-          const abs = new URL(url, location.href).href;
-          const shim =
-            "(function(){var bc=new BroadcastChannel('viva-token-sync');var of=self.fetch;" +
-            "self.fetch=function(i,n){try{var h=(n&&n.headers)||(i&&i.headers),a=null;" +
-            "if(h){if(typeof h.get==='function')a=h.get('authorization');" +
-            "else if(Array.isArray(h)){for(var p of h)if(String(p[0]).toLowerCase()==='authorization')a=p[1];}" +
-            "else{for(var k in h)if(k.toLowerCase()==='authorization')a=h[k];}}" +
-            "if(a&&a.indexOf('Bearer ')===0)bc.postMessage(a.slice(7));}catch(e){}" +
-            "return of.apply(this,arguments);};" +
-            "importScripts(" + JSON.stringify(abs) + ");})();";
-          const burl = URL.createObjectURL(new Blob([shim], { type: "application/javascript" }));
-          return new Orig(burl, opts);
-        } catch (e) {
-          return new Orig(url, opts);  // fallback: oförändrad worker
-        }
-      };
-      window.Worker.prototype = Orig.prototype;
-    } catch (e) { log("worker-hook misslyckades", e); }
+  // MSAL-vägen (primär): be Yammer Web:s MSAL-instans om en färsk yammer-token.
+  // Token cachas krypterat i localStorage med icke-extraherbar nyckel, så enda
+  // pålitliga vägen är MSAL:s eget API - som dessutom förnyar tyst åt oss.
+  function findPca(root) {
+    const seen = new Set(); const stack = [root]; let n = 0;
+    while (stack.length && n++ < 8000) {
+      const o = stack.pop();
+      if (!o || typeof o !== "object" || seen.has(o)) continue;
+      seen.add(o);
+      if (typeof o.acquireTokenSilent === "function" && typeof o.getAllAccounts === "function") return o;
+      for (const k in o) { try { stack.push(o[k]); } catch (e) {} }
+    }
+    return null;
   }
+
+  async function pollMsal() {
+    const pca = findPca(PAGE.msal) || findPca(PAGE);
+    if (!pca) return false;
+    try {
+      const account = (pca.getActiveAccount && pca.getActiveAccount()) ||
+                      (pca.getAllAccounts() || [])[0];
+      const res = await pca.acquireTokenSilent({ scopes: YAMMER_SCOPES, account });
+      if (res && res.accessToken) { stat.msal++; grab("Bearer " + res.accessToken); }
+      return true;
+    } catch (e) {
+      log("acquireTokenSilent fel", e && e.errorCode || e);
+      return true;  // instans hittad även om just detta anrop fallerade
+    }
+  }
+
+  // MSAL laddas efter sidstart - leta tills instansen finns, glesa sedan ut.
+  let msalTries = 0;
+  const msalFind = setInterval(async () => {
+    const found = await pollMsal();
+    if (found) { clearInterval(msalFind); setInterval(pollMsal, 5 * 60 * 1000); }
+    else if (++msalTries > 60) clearInterval(msalFind);  // ge upp efter ~3 min
+  }, 3000);
 
   // Skanna webblagring efter en giltig, cachad Yammer-token (MSAL m.fl.).
   function looksLikeJwt(s) {
@@ -223,11 +232,11 @@
       el.style.background = isError ? "#dc2626" : "#2563eb";
       return;
     }
-    el.style.background = (stat.yammer || stat.store) ? "#16a34a" : "#2563eb";
+    el.style.background = (stat.yammer || stat.store || stat.msal) ? "#16a34a" : "#2563eb";
     el.textContent =
       "Viva-token-sync aktiv\n" +
-      "Yammer-token: " + (stat.yammer + stat.store) +
-        " (nät " + stat.yammer + " / lagring " + stat.store + " / worker " + stat.worker + ")" +
+      "Yammer-token: " + (stat.yammer + stat.store + stat.msal) +
+        " (MSAL " + stat.msal + " / nät " + stat.yammer + " / lagring " + stat.store + ")" +
         (stat.sent ? "\nskickad " + stat.sent : "") + "\n" +
       "andra tokens: " + stat.other + "\n" +
       "senaste aud: " + stat.lastAud;
