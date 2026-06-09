@@ -101,11 +101,12 @@ def main() -> None:
     update = "--update" in sys.argv
     mode = "inkrementell uppdatering" if update else "full dump"
     print(f"Hämtar grupplista (alla communities i nätverket) - {mode}...")
-    groups = yammer.iter_all_groups()
-    _save(RAW / "groups.json", groups)
-    print(f"  {len(groups)} grupper.\n")
 
     try:
+        groups = yammer.iter_all_groups()
+        _save(RAW / "groups.json", groups)
+        print(f"  {len(groups)} grupper.\n")
+
         for i, g in enumerate(groups, 1):
             gid = g["id"]
             name = g.get("full_name") or g.get("name")
