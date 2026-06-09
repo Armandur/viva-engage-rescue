@@ -62,7 +62,9 @@ def main() -> None:
             g.get("privacy"), g.get("created_at"), g.get("web_url"),
         )
 
-    for page in sorted((RAW / "groups").glob("*/page_*.json")):
+    page_files = (sorted((RAW / "groups").glob("*/page_*.json"))
+                  + sorted((RAW / "threads").glob("*/page_*.json")))
+    for page in page_files:
         data = json.loads(page.read_text(encoding="utf-8"))
         for r in data.get("references", []):
             if r.get("type") == "user" and r["id"] not in users:

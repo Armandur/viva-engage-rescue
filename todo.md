@@ -10,6 +10,9 @@
 - [ ] Panelen och arkiv-UI:t är handrullad CSS just nu. Om det underlättar när
       vyerna växer: ta in Bootstrap (eller annat lämpligt lib) i stället för att
       bygga mer egen CSS. (Önskemål från Rasmus 2026-06-09.)
+- [ ] Trådvyn visar svar platt och kronologiskt. Visualisera nästling med indrag
+      och färgade nivålinjer till vänster (strukturen finns via replied_to_id).
+      (Önskemål från Rasmus 2026-06-09.)
 
 ## Token / drift
 - [ ] IndexedDB-skanning i userscriptet är sista försöket till auto-fångst i nya

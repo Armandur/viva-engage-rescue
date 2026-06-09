@@ -110,6 +110,7 @@ async function refresh() {
             <button class="sec" onclick="post('/stop')">Stoppa</button>`;
   } else {
     ctrl = `<button onclick="post('/start/dump')">Starta/återuppta dump</button>
+            <button class="sec" onclick="post('/start/threads')">Komplettera trådar</button>
             <button class="sec" onclick="post('/start/update')">Uppdatera (hämta nya)</button>
             <button class="sec" onclick="post('/start/download')">Ladda ner bilagor</button>`;
   }

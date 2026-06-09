@@ -128,3 +128,17 @@ def iter_group_message_pages(group_id: int, older_than: int | None = None):
         if not messages or not feed.get("meta", {}).get("older_available"):
             break
         older_than = min(m["id"] for m in messages)
+
+
+def iter_thread_pages(thread_id: int, older_than: int | None = None):
+    """Generator: yieldar råa feed-sidor för en hel tråd (in_thread)."""
+    while True:
+        params = {"limit": 20}
+        if older_than is not None:
+            params["older_than"] = older_than
+        feed = get(f"messages/in_thread/{thread_id}.json", **params)
+        messages = feed.get("messages", []) if isinstance(feed, dict) else []
+        yield feed
+        if not messages or not feed.get("meta", {}).get("older_available"):
+            break
+        older_than = min(m["id"] for m in messages)

@@ -29,6 +29,7 @@ PIDFILE = ROOT / "data" / "run.pid"
 LOGS = {
     "dump": ROOT / "data" / "dump.log",
     "update": ROOT / "data" / "dump.log",  # inkrementell skriver till samma logg
+    "threads": ROOT / "data" / "threads.log",
     "download": ROOT / "data" / "download.log",
 }
 
@@ -112,6 +113,7 @@ def _running() -> dict | None:
 _COMMANDS = {
     "dump": ["scraper.dump"],
     "update": ["scraper.dump", "--update"],
+    "threads": ["scraper.threads"],
     "download": ["scraper.download"],
 }
 
