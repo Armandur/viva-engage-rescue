@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Container-driver krävs för gha-cache (default docker-drivern stödjer den inte).
+      - uses: docker/setup-buildx-action@v3
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
