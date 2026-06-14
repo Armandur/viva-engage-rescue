@@ -1,0 +1,29 @@
+# Single-container-drift på Unraid (TERVO2). Image från GHCR.
+# Publika arkivet körs i drift (bakom Nginx Proxy Manager för åtkomstskydd).
+# Admin-panelen startas bara vid behov: docker compose --profile admin up -d
+services:
+  archive:
+    image: ghcr.io/armandur/viva-engage-rescue:latest
+    container_name: viva-arkiv
+    restart: unless-stopped
+    ports:
+      - "8051:8051"
+    volumes:
+      # Persistent data: rådata, archive.db, attachments/, avatars/, thumbnails/.
+      # På Unraid: peka mot en host-path, t.ex. /mnt/user/appdata/viva-arkiv/data.
+      - ./data:/app/data:ro
+
+  # Admin/kontrollpanel - INTE exponerad externt. Startas bara vid omkörningar:
+  #   docker compose --profile admin up -d admin
+  admin:
+    image: ghcr.io/armandur/viva-engage-rescue:latest
+    container_name: viva-admin
+    profiles: ["admin"]
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8050"]
+    ports:
+      - "8050:8050"
+    env_file:
+      - .env          # YAMMER_TOKEN m.m. för skrapning
+    volumes:
+      - ./data:/app/data   # admin skriver (skrapning/bygge), därför inte ro

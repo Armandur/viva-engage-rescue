@@ -1,0 +1,17 @@
+data/
+.venv/
+tmp/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.log
+.git/
+.gitignore
+.env
+.env.*
+!.env.example
+dev.log
+README.md
+DOCKER.md
+todo.md
+browser/

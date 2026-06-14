@@ -1,0 +1,13 @@
+# Lokal utveckling: bygg imagen lokalt och kör med kod-mount + reload.
+#   docker compose -f docker-compose.dev.yml up --build
+services:
+  archive:
+    build: .
+    container_name: viva-arkiv-dev
+    ports:
+      - "8051:8051"
+    volumes:
+      - ./data:/app/data
+      - ./app:/app/app
+      - ./scraper:/app/scraper
+    command: ["uvicorn", "app.public:app", "--host", "0.0.0.0", "--port", "8051", "--reload"]
