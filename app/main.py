@@ -12,6 +12,7 @@ import json
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -36,14 +37,22 @@ LOGS = {
     "update": ROOT / "data" / "dump.log",  # inkrementell skriver till samma logg
     "threads": ROOT / "data" / "threads.log",
     "download": ROOT / "data" / "download.log",
+    "enrich": ROOT / "data" / "enrich.log",
+    "storylines": ROOT / "data" / "storylines.log",
+    "community_info": ROOT / "data" / "community_info.log",
+    "users": ROOT / "data" / "users.log",
+    "reactors": ROOT / "data" / "reactors.log",
+    "pipeline": ROOT / "data" / "pipeline.log",
 }
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app = FastAPI(title="Viva Engage-dump")
 
 from app.archive import router as archive_router  # noqa: E402
+from app.archive import admin_router  # noqa: E402
 
 app.include_router(archive_router)
+app.include_router(admin_router)  # exempel + nekade bilagor, bara i admin-panelen
 
 
 # ---- token ----
@@ -106,13 +115,31 @@ def _running() -> dict | None:
         return None
     try:
         data = json.loads(PIDFILE.read_text(encoding="utf-8"))
-        os.kill(data["pid"], 0)  # lever?
-        return data
-    except (ProcessLookupError, ValueError, KeyError, json.JSONDecodeError):
+        pid = data["pid"]
+    except (ValueError, KeyError, json.JSONDecodeError):
+        PIDFILE.unlink(missing_ok=True)
+        return None
+    # Reapa om det är vårt eget avslutade barn (annars rapporterar os.kill det
+    # som levande - en zombie - och panelen fastnar på "kör").
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            PIDFILE.unlink(missing_ok=True)
+            return None
+    except ChildProcessError:
+        pass  # inte vårt barn (panelen omstartad) - faller tillbaka nedan
+    except OSError:
+        pass
+    try:
+        os.kill(pid, 0)  # lever?
+    except ProcessLookupError:
         PIDFILE.unlink(missing_ok=True)
         return None
     except PermissionError:
         return data  # finns men ägs av annan - betrakta som körande
+    if _is_zombie(pid):  # avslutat men ännu inte reapat
+        PIDFILE.unlink(missing_ok=True)
+        return None
+    return data
 
 
 _COMMANDS = {
@@ -120,21 +147,30 @@ _COMMANDS = {
     "update": ["scraper.dump", "--update"],
     "threads": ["scraper.threads"],
     "download": ["scraper.download"],
+    "enrich": ["scraper.enrich"],
+    "storylines": ["scraper.storylines"],
+    "community_info": ["scraper.community_info"],
+    "users": ["scraper.users"],
+    "reactors": ["scraper.reactors"],
+    "pipeline": ["scraper.pipeline"],
 }
 
 
-def _start(kind: str) -> None:
+def _start(kind: str, groups: str = "") -> None:
     if kind not in _COMMANDS:
         raise HTTPException(400, "okänd körningstyp")
     if _running():
         raise HTTPException(409, "en körning pågår redan")
     if not _read_env().get("YAMMER_TOKEN"):
         raise HTTPException(400, "ingen token satt")
+    cmd = [sys.executable, "-m", *_COMMANDS[kind]]
+    gids = [g for g in re.split(r"[,\s]+", groups.strip()) if g.isdigit()]
+    if gids:
+        cmd += ["--groups", ",".join(gids)]
     log = LOGS[kind].open("w", encoding="utf-8")
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen(
-        [sys.executable, "-m", *_COMMANDS[kind]],
-        cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, env=env,
+        cmd, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, env=env,
     )
     PIDFILE.write_text(
         json.dumps({"pid": proc.pid, "kind": kind, "started": time.time()}),
@@ -153,18 +189,44 @@ def _stop() -> None:
     PIDFILE.unlink(missing_ok=True)
 
 
+def _is_zombie(pid: int) -> bool:
+    """True om processen avslutat men inte reapats (os.kill rapporterar den
+    annars som levande). Läser tillståndsfältet i /proc/{pid}/stat."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+            data = f.read()
+        return data.rsplit(")", 1)[1].split()[0] == "Z"
+    except OSError:
+        return False
+
+
 def _build_running() -> bool:
     """Arkivbygget har egen spårning - får köra parallellt med en dump."""
     if not BUILDPID.exists():
         return False
     try:
-        os.kill(int(BUILDPID.read_text()), 0)
-        return True
-    except (ProcessLookupError, ValueError):
+        pid = int(BUILDPID.read_text(encoding="utf-8"))
+    except ValueError:
+        BUILDPID.unlink(missing_ok=True)
+        return False
+    # Reapa om det är vårt eget avslutade barn (annars blir det en zombie).
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            BUILDPID.unlink(missing_ok=True)
+            return False
+    except ChildProcessError:
+        pass  # inte vårt barn (panelen omstartad) - faller tillbaka nedan
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
         BUILDPID.unlink(missing_ok=True)
         return False
     except PermissionError:
         return True
+    if _is_zombie(pid):  # avslutat men ännu inte reapat
+        BUILDPID.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def _start_build() -> None:
@@ -186,6 +248,8 @@ def _progress() -> dict:
     total = 0
     if groups_file.exists():
         total = len(json.loads(groups_file.read_text(encoding="utf-8")))
+    # Meddelande-/trådantal per community ur det byggda arkivet (snabbt, en query).
+    stats = _community_stats()
     done = skipped = in_progress = pages = 0
     rows = []
     if (RAW / "groups").exists():
@@ -208,17 +272,94 @@ def _progress() -> dict:
             else:
                 status = "pågår"
                 in_progress += 1
-            rows.append({"name": gname, "pages": npages, "status": status})
+            gid = _as_int(gdir.name)
+            msgs, threads = stats.get(gid, (0, 0))
+            rows.append({"id": gid, "name": gname, "pages": npages, "status": status,
+                         "messages": msgs, "threads": threads})
     attachments = len(list(ATT.glob("*"))) if ATT.exists() else 0
     return {
         "groups_total": total, "done": done, "skipped": skipped,
         "in_progress": in_progress, "pages": pages, "attachments": attachments,
         "bytes_raw": _dir_size(RAW), "bytes_attachments": _dir_size(ATT),
-        "rows": sorted(rows, key=lambda r: r["pages"], reverse=True),
+        "rows": sorted(rows, key=lambda r: (r["messages"], r["pages"]), reverse=True),
+        "storyline": _storyline_summary(),
     }
 
 
-def _dir_size(p: Path) -> int:
+def _storyline_summary() -> dict | None:
+    """Storyline-täckning: upptäckta trådar/användare (ur discovered-filen) +
+    vad som faktiskt ligger i arkivet (group_id NULL). None om inget finns."""
+    disc = ROOT / "data" / "raw" / "storyline_threads.json"
+    threads_disc = 0
+    if disc.exists():
+        try:
+            d = json.loads(disc.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and "threads" in d:  # nytt platt format
+                threads_disc = len(d.get("threads") or [])
+            elif isinstance(d, dict):  # gammalt {user_id: [tids]}
+                tids: set = set()
+                for v in d.values():
+                    if v:
+                        tids.update(v)
+                threads_disc = len(tids)
+        except (ValueError, OSError):
+            pass
+    msgs = threads_arch = users_with = 0
+    if ARCHIVE_DB.exists():
+        try:
+            con = sqlite3.connect(f"file:{ARCHIVE_DB}?mode=ro", uri=True)
+            msgs = con.execute(
+                "SELECT COUNT(*) FROM messages WHERE group_id IS NULL").fetchone()[0]
+            threads_arch = con.execute(
+                "SELECT COUNT(DISTINCT thread_id) FROM messages WHERE group_id IS NULL"
+            ).fetchone()[0]
+            users_with = con.execute(
+                "SELECT COUNT(DISTINCT sender_id) FROM messages "
+                "WHERE group_id IS NULL AND sender_id IS NOT NULL").fetchone()[0]
+            con.close()
+        except sqlite3.Error:
+            pass
+    if not (threads_disc or msgs):
+        return None
+    return {"users_with": users_with, "threads_discovered": threads_disc,
+            "messages": msgs, "threads": threads_arch}
+
+
+def _as_int(s: str) -> int:
+    try:
+        return int(s)
+    except ValueError:
+        return -1
+
+
+def _community_stats() -> dict[int, tuple[int, int]]:
+    """{group_id: (antal_meddelanden, antal_trådar)} ur archive.db, eller tomt."""
+    if not ARCHIVE_DB.exists():
+        return {}
+    try:
+        con = sqlite3.connect(f"file:{ARCHIVE_DB}?mode=ro", uri=True)
+        rows = con.execute(
+            "SELECT group_id, COUNT(*), COUNT(DISTINCT thread_id) "
+            "FROM messages GROUP BY group_id"
+        ).fetchall()
+        con.close()
+        return {gid: (mc, tc) for gid, mc, tc in rows}
+    except sqlite3.Error:
+        return {}
+
+
+_size_cache: dict[str, tuple[float, int]] = {}
+
+
+def _dir_size(p: Path, ttl: float = 60.0) -> int:
+    """Total storlek på ett katalogträd. TTL-cachad: data/raw/ rymmer tiotusentals
+    filer (33k+ profiler m.m.) och en full rglob tar ~1,5s - den får inte köras
+    var 3:e sekund när panelen pollar /api/status. Storleken ändras långsamt."""
+    key = str(p)
+    now = time.time()
+    hit = _size_cache.get(key)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
     total = 0
     if p.exists():
         for f in p.rglob("*"):
@@ -227,6 +368,7 @@ def _dir_size(p: Path) -> int:
                     total += f.stat().st_size
                 except OSError:
                     pass
+    _size_cache[key] = (now, total)
     return total
 
 
@@ -274,6 +416,227 @@ def _thread_status() -> dict | None:
     }
 
 
+_REACTIONS_DIR = ROOT / "data" / "raw" / "reactions"
+_enrich_samples: deque = deque(maxlen=30)
+
+
+def _enrich_total() -> int:
+    """Antal trådar att berika = distinkta trådar i arkivet."""
+    if not ARCHIVE_DB.exists():
+        return 0
+    try:
+        con = sqlite3.connect(f"file:{ARCHIVE_DB}?mode=ro", uri=True)
+        n = con.execute("SELECT COUNT(DISTINCT thread_id) FROM messages").fetchone()[0]
+        con.close()
+        return n
+    except sqlite3.Error:
+        return 0
+
+
+def _enrich_status() -> dict | None:
+    if not _REACTIONS_DIR.exists():
+        return None
+    done = len(list(_REACTIONS_DIR.glob("*.done")))
+    skipped = len(list(_REACTIONS_DIR.glob("*.skipped")))
+    if done == 0 and skipped == 0:
+        return None
+    total = _enrich_total() or (done + skipped)
+    now = time.time()
+    _enrich_samples.append((now, done))
+    rate = eta = None
+    if len(_enrich_samples) >= 2:
+        t0, d0 = _enrich_samples[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt
+            eta = int(max(total - done - skipped, 0) / rate)
+    return {
+        "total": total, "done": done, "skipped": skipped,
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
+_STORYLINE_PROGRESS = ROOT / "data" / "storyline_progress.json"
+_storyline_samples: deque = deque(maxlen=30)
+
+
+def _storyline_status() -> dict | None:
+    if not _STORYLINE_PROGRESS.exists():
+        return None
+    try:
+        p = json.loads(_STORYLINE_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    done, total, phase = p.get("done", 0), p.get("total", 0), p.get("phase", "")
+    now = time.time()
+    _storyline_samples.append((now, done, phase))
+    rate = eta = None
+    same = [(t, d) for t, d, ph in _storyline_samples if ph == phase]
+    if len(same) >= 2:
+        t0, d0 = same[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt
+            eta = int(max(total - done, 0) / rate)
+    return {
+        "phase": phase, "total": total, "done": done,
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
+_UPDATE_PROGRESS = ROOT / "data" / "update_progress.json"
+
+
+def _update_status() -> dict | None:
+    """Nya inlägg under en pågående --update-körning. {new_posts, checked, total}."""
+    if not _UPDATE_PROGRESS.exists():
+        return None
+    try:
+        return json.loads(_UPDATE_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
+_DOWNLOAD_PROGRESS = ROOT / "data" / "download_progress.json"
+_download_samples: deque = deque(maxlen=30)
+
+
+def _download_status() -> dict | None:
+    if not _DOWNLOAD_PROGRESS.exists():
+        return None
+    try:
+        p = json.loads(_DOWNLOAD_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    done, total = p.get("done", 0), p.get("total", 0)
+    now = time.time()
+    _download_samples.append((now, done))
+    rate = eta = None
+    if len(_download_samples) >= 2:
+        t0, d0 = _download_samples[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt
+            eta = int(max(total - done, 0) / rate)
+    return {
+        "total": total, "done": done, "downloaded": p.get("downloaded", 0),
+        "skipped": p.get("skipped", 0), "denied": p.get("denied", 0),
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
+_CINFO_DIR = ROOT / "data" / "raw" / "community_info"
+_cinfo_samples: deque = deque(maxlen=30)
+
+
+def _community_info_total() -> int:
+    """Antal communities att hämta info för = rader i communities-tabellen."""
+    if not ARCHIVE_DB.exists():
+        return 0
+    try:
+        con = sqlite3.connect(f"file:{ARCHIVE_DB}?mode=ro", uri=True)
+        n = con.execute("SELECT COUNT(*) FROM communities").fetchone()[0]
+        con.close()
+        return n
+    except sqlite3.Error:
+        return 0
+
+
+def _community_info_status() -> dict | None:
+    if not _CINFO_DIR.exists():
+        return None
+    done = len(list(_CINFO_DIR.glob("*.json")))
+    if done == 0:
+        return None
+    total = _community_info_total() or done
+    now = time.time()
+    _cinfo_samples.append((now, done))
+    rate = eta = None
+    if len(_cinfo_samples) >= 2:
+        t0, d0 = _cinfo_samples[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt
+            eta = int(max(total - done, 0) / rate)
+    return {
+        "total": total, "done": done,
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
+_USERS_PROGRESS = ROOT / "data" / "users_progress.json"
+_users_samples: deque = deque(maxlen=30)
+
+
+def _users_status() -> dict | None:
+    if not _USERS_PROGRESS.exists():
+        return None
+    try:
+        p = json.loads(_USERS_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    phase, done, total = p.get("phase", ""), p.get("done", 0), p.get("total", 0)
+    now = time.time()
+    _users_samples.append((now, done, phase))
+    rate = eta = None
+    same = [(t, d) for t, d, ph in _users_samples if ph == phase]
+    if len(same) >= 2:
+        t0, d0 = same[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt
+            eta = int(max(total - done, 0) / rate) if total else None
+    return {
+        "phase": phase, "total": total, "done": done, "recent": p.get("recent", []),
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
+_REACTORS_PROGRESS = ROOT / "data" / "reactors_progress.json"
+_reactors_samples: deque = deque(maxlen=30)
+
+
+def _reactors_status() -> dict | None:
+    if not _REACTORS_PROGRESS.exists():
+        return None
+    try:
+        p = json.loads(_REACTORS_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    done, total = p.get("done", 0), p.get("total", 0)
+    now = time.time()
+    _reactors_samples.append((now, done))
+    rate = eta = None
+    if len(_reactors_samples) >= 2:
+        t0, d0 = _reactors_samples[0]
+        dt, dd = now - t0, done - d0
+        if dt > 0 and dd > 0:
+            rate = dd / dt
+            eta = int(max(total - done, 0) / rate)
+    return {
+        "total": total, "done": done, "upgraded": p.get("upgraded", 0),
+        "rate_per_min": round(rate * 60, 1) if rate else None,
+        "eta_seconds": eta,
+    }
+
+
+_PIPELINE_PROGRESS = ROOT / "data" / "pipeline_progress.json"
+
+
+def _pipeline_status() -> dict | None:
+    if not _PIPELINE_PROGRESS.exists():
+        return None
+    try:
+        return json.loads(_PIPELINE_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
 def _log_tail(kind: str, n: int = 25) -> str:
     log = LOGS.get(kind)
     if not log or not log.exists():
@@ -314,6 +677,14 @@ def status():
             "building": _build_running(),
         },
         "threads": _thread_status(),
+        "enrich": _enrich_status(),
+        "storylines": _storyline_status(),
+        "download": _download_status(),
+        "update": _update_status(),
+        "community_info": _community_info_status(),
+        "users": _users_status(),
+        "reactors": _reactors_status(),
+        "pipeline": _pipeline_status(),
     }
 
 
@@ -342,8 +713,8 @@ def api_token(payload: dict = Body(...)):
 
 
 @app.post("/start/{kind}")
-def start(kind: str):
-    _start(kind)
+def start(kind: str, groups: str = ""):
+    _start(kind, groups)
     return RedirectResponse("/", status_code=302)
 
 

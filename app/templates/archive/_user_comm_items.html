@@ -1,0 +1,7 @@
+{% for m in community %}
+<div class="list-group-item list-group-item-action" role="button" style="cursor:pointer"
+     onclick="location.href='/arkiv/t/{{ m['thread_id'] }}#m{{ m['id'] }}'">
+  <div class="body body-clamp">{{ render_body(m["body_rich"]) or m["body_plain"] or "(ingen text)" }}</div>
+  <small class="text-secondary">{% if m["community"] %}{{ m["community"] }} · {% endif %}{{ m["created_at"]|svtid }}</small>
+</div>
+{% endfor %}

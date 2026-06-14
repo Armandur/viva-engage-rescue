@@ -1,21 +1,62 @@
 {% extends "archive/base.html" %}
 {% block content %}
-{% if q %}
-  <p class="text-secondary">{{ hits|length }} träffar för "{{ q }}"{% if hits|length == 200 %} (visar de 200 mest relevanta){% endif %}</p>
-  {% for h in hits %}
-  <div class="card mb-2">
-    <div class="card-body py-2">
-      <div class="small text-secondary">
-        {{ h["community"] }} · {{ h["sender"] or "Okänd" }} · {{ h["created_at"] }}
-      </div>
-      <div class="body">{{ h["snip"]|safe }}</div>
-      <a href="/arkiv/t/{{ h['thread_id'] }}#m{{ h['id'] }}">Visa i tråden →</a>
-    </div>
+<form class="row g-2 mb-3" action="/arkiv/sok" method="get">
+  <input type="hidden" name="q" value="{{ q|default('') }}">
+  <div class="col-md-4">
+    <label class="form-label small mb-0">Community</label>
+    <select name="grupp" class="form-select form-select-sm">
+      <option value="">Alla</option>
+      {% for c in communities %}
+      <option value="{{ c['id'] }}" {% if grupp == c['id'] %}selected{% endif %}>{{ c["full_name"] }}</option>
+      {% endfor %}
+    </select>
   </div>
-  {% else %}
-  <p>Inga träffar.</p>
-  {% endfor %}
+  <div class="col-md-3">
+    <label class="form-label small mb-0">Avsändare</label>
+    <input name="avsandare" value="{{ avsandare|default('') }}" class="form-control form-control-sm" placeholder="namn">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small mb-0">Från</label>
+    <input type="date" name="fran" value="{{ fran|default('') }}" class="form-control form-control-sm">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small mb-0">Till</label>
+    <input type="date" name="till" value="{{ till|default('') }}" class="form-control form-control-sm">
+  </div>
+  <div class="col-md-1 d-flex align-items-end">
+    <button class="btn btn-primary btn-sm w-100" type="submit">Filtrera</button>
+  </div>
+</form>
+
+{% if q or has_filter %}
+  <p class="text-secondary">{{ total }} träffar{% if q %} för "{{ q }}"{% endif %}</p>
+  <div id="hitlist">{% include "archive/_search_items.html" %}</div>
+  {% if not hits %}<p>Inga träffar.</p>{% endif %}
+  <div id="hit-loading" class="text-center text-secondary small py-3 d-none">laddar fler träffar…</div>
+  <div id="hit-sentinel" data-offset="{{ hits|length }}" data-total="{{ total }}" data-qs="{{ search_qs }}"></div>
+  <script>
+  (function () {
+    const list = document.getElementById("hitlist");
+    const s = document.getElementById("hit-sentinel");
+    const loadingEl = document.getElementById("hit-loading");
+    const qs = s.dataset.qs, total = +s.dataset.total;
+    let offset = +s.dataset.offset, loading = false, done = offset >= total;
+    async function more() {
+      if (loading || done) return;
+      loading = true; loadingEl.classList.remove("d-none");
+      try {
+        const html = await (await fetch(`/arkiv/sok/mer?${qs}&offset=${offset}`)).text();
+        if (html.trim()) list.insertAdjacentHTML("beforeend", html);
+        offset = list.querySelectorAll(".card").length;
+        done = offset >= total || !html.trim();
+      } catch (e) { /* nätfel - försök igen vid nästa skroll */ }
+      loading = false; loadingEl.classList.add("d-none");
+    }
+    new IntersectionObserver(es => { if (es[0].isIntersecting) more(); },
+                             { rootMargin: "600px" }).observe(s);
+  })();
+  </script>
 {% else %}
-  <p class="text-secondary">Skriv något i sökrutan.</p>
+  <p class="text-secondary">Skriv något i sökrutan, eller filtrera på community/avsändare/datum.</p>
 {% endif %}
 {% endblock %}

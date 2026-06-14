@@ -11,19 +11,36 @@
   </script>
   <style>
     body { max-width: 920px; }
-    .body { white-space: pre-wrap; word-wrap: break-word; }
+    .body { word-wrap: break-word; }
+    .body p:last-child { margin-bottom: 0; }
     mark { padding: 0; }
-    .lvl1 { border-left: 3px solid #0d6efd !important; }
-    .lvl2 { border-left: 3px solid #20c997 !important; }
-    .lvl3 { border-left: 3px solid #fd7e14 !important; }
-    .lvl4 { border-left: 3px solid #d63384 !important; }
-    .lvl5 { border-left: 3px solid #6f42c1 !important; }
+    .badge-announcement { background-color: #d63384; color: #fff; }
+    .avatar { width: 2.5rem; height: 2.5rem; font-size: .9rem; font-weight: 600;
+              object-fit: cover; }
+    .reaction { cursor: default; }
+    .reaction-tip .tooltip-inner { text-align: left; max-width: 18rem;
+        max-height: 14rem; overflow-y: auto; }
+    .body-clamp { display: -webkit-box; -webkit-line-clamp: 6; line-clamp: 6;
+                  -webkit-box-orient: vertical; overflow: hidden; }
+    .linkcard { max-width: 32rem; }
+    .linkcard:hover { background: var(--bs-tertiary-bg); }
+    .linkcard-desc { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+                     -webkit-box-orient: vertical; overflow: hidden; }
+    .min-w-0 { min-width: 0; }
+    /* Trådskenor: kontinuerlig färgad vänsterlinje per nästlingsnivå (Reddit-stil) */
+    .replies { padding-left: .9rem; margin-left: .45rem; border-left: 2px solid; }
+    .replies.lvl1 { border-left-color: #0d6efd; }
+    .replies.lvl2 { border-left-color: #20c997; }
+    .replies.lvl3 { border-left-color: #fd7e14; }
+    .replies.lvl4 { border-left-color: #d63384; }
+    .replies.lvl5 { border-left-color: #6f42c1; }
   </style>
 </head>
 <body class="container py-3">
   <header class="d-flex flex-wrap gap-3 align-items-center border-bottom pb-3 mb-3">
     <a class="navbar-brand fw-bold" href="/arkiv">Viva-arkiv</a>
-    <a class="small" href="/arkiv/exempel">exempel</a>
+    <a class="small" href="/arkiv/oversikt">översikt</a>
+    <a class="small" href="/arkiv/storylines">storylines</a>
     <form class="d-flex flex-grow-1" action="/arkiv/sok" method="get" role="search">
       <input name="q" value="{{ q|default('') }}" class="form-control me-2"
              placeholder="Sök i alla meddelanden…" autofocus>
@@ -31,5 +48,45 @@
     </form>
   </header>
   {% block content %}{% endblock %}
+  {% if archive_built() %}
+  <footer class="text-secondary small border-top mt-4 pt-2">
+    Arkivet byggt {{ archive_built() }}
+  </footer>
+  {% endif %}
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+  // Generisk flik <-> URL-hash-synk: aktiv flik speglas i hashen (delbar,
+  // överlever omladdning) och återställs vid laddning. Hanterar nästlade flikar.
+  // Rör bara .tab-pane, så #t<id>/#m<id>-ankare påverkas inte.
+  (function () {
+    // Snygga hover-popups (reaktioner m.m.) i stället för webbläsarens alt-text.
+    if (window.bootstrap)
+      document.querySelectorAll('[data-bs-toggle="tooltip"]')
+        .forEach(el => new bootstrap.Tooltip(el));
+    function chain(pane) {
+      const out = [];
+      for (let el = pane; el; el = el.parentElement)
+        if (el.classList && el.classList.contains("tab-pane")) out.unshift(el);
+      return out;
+    }
+    document.querySelectorAll('[data-bs-toggle="tab"]').forEach(btn => {
+      btn.addEventListener("shown.bs.tab", e => {
+        const t = e.target.getAttribute("data-bs-target");
+        if (t) history.replaceState(null, "", t);
+      });
+    });
+    const h = location.hash;
+    if (h.length > 1 && window.bootstrap) {
+      let target;
+      try { target = document.querySelector(h); } catch (e) { return; }
+      if (target && target.classList.contains("tab-pane")) {
+        chain(target).forEach(p => {
+          const btn = document.querySelector('[data-bs-toggle="tab"][data-bs-target="#' + p.id + '"]');
+          if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+        });
+      }
+    }
+  })();
+  </script>
 </body>
 </html>

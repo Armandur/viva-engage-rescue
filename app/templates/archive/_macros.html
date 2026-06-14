@@ -1,0 +1,7 @@
+{% macro commbadges(c) -%}
+{%- if c["accessible"] == 0 %}<span class="badge text-bg-danger" title="Privat community vi inte är medlem i - inget innehåll/medlemslista åtkomligt, inget arkiverat.">Ej åtkomstbar</span> {% endif -%}
+{%- if c["restricted_posting"] %}<span class="badge text-bg-info" title="Kornet-kopplat ämne: Viva-inläggen användes som kommentarsfält på intranätet Kornet. Får inga nya inlägg.">Kornet</span> {% endif -%}
+{%- if c["company_group"] %}<span class="badge text-bg-dark">🏛 All Company</span> {% endif -%}
+{%- if c["privacy"] == "private" %}<span class="badge text-bg-secondary">🔒 Privat</span> {% endif -%}
+{%- if c["moderated"] %}<span class="badge text-bg-warning text-dark">Modererad</span> {% endif -%}
+{%- endmacro %}

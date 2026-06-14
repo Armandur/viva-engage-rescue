@@ -1,0 +1,11 @@
+{% for h in hits %}
+<div class="card mb-2">
+  <div class="card-body py-2">
+    <div class="small text-secondary">
+      {% if h["community"] %}<a href="/arkiv/c/{{ h['group_id'] }}">{{ h["community"] }}</a> · {% endif %}{% if h["sender_id"] %}<a href="/arkiv/u/{{ h['sender_id'] }}">{{ h["sender"] or "Okänd" }}</a>{% else %}{{ h["sender"] or "Okänd" }}{% endif %} · {{ h["created_at"]|svtid }}
+    </div>
+    <div class="body">{{ h["snip"] }}</div>
+    <a href="/arkiv/t/{{ h['thread_id'] }}#m{{ h['id'] }}">Visa i tråden →</a>
+  </div>
+</div>
+{% endfor %}

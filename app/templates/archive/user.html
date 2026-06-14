@@ -1,0 +1,135 @@
+{% extends "archive/base.html" %}
+{% block title %}{{ info["full_name"] if info else "Användare" }} - Viva-arkiv{% endblock %}
+{% macro slist(rows, empty, show_owner) %}
+<div class="list-group list-group-flush">
+  {% for m in rows %}
+  <div class="list-group-item list-group-item-action" role="button" style="cursor:pointer"
+       onclick="location.href='/arkiv/t/{{ m['thread_id'] }}#m{{ m['id'] }}'">
+    <div class="body body-clamp">{{ render_body(m["body_rich"]) or m["body_plain"] or "(ingen text)" }}</div>
+    <small class="text-secondary">{% if show_owner %}på <a href="/arkiv/u/{{ m['wall_owner'] }}" onclick="event.stopPropagation()">{{ m["wall_owner_name"] or "okänd" }}</a>s storyline · {% endif %}{{ m["created_at"]|svtid }}</small>
+  </div>
+  {% else %}
+  <p class="text-secondary p-3 mb-0">{{ empty }}</p>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% block content %}
+{% set parts = (info["full_name"] if info else "?").split() %}
+{% set initials = (parts[0][:1] ~ (parts[-1][:1] if parts|length > 1 else ''))|upper %}
+<div class="d-flex align-items-center gap-3 mb-3">
+  <img src="/arkiv/avatar/{{ uid }}?n={{ (info['full_name'] if info else '?')|urlencode }}"
+       alt="{{ info['full_name'] if info else 'Okänd' }}" class="rounded-circle flex-shrink-0"
+       style="width:4rem;height:4rem;object-fit:cover">
+
+  <div class="min-w-0">
+    <h1 class="h4 mb-0">{{ info["full_name"] if info else "Okänd användare" }}</h1>
+    <div class="text-secondary small">
+      {% if info and info["job_title"] %}{{ info["job_title"] }}{% endif %}
+      {% if info and info["department"] %}· {{ info["department"] }}{% endif %}
+      {% if info and info["location"] %}· {{ info["location"] }}{% endif %}
+      {% if info and info["email"] %}· {{ info["email"] }}{% endif %}
+      {% if info and info["state"] and info["state"] != "active" %}· <span class="badge text-bg-secondary">{{ info["state"] }}</span>{% endif %}
+      {% if info and info["aad_guest"] %}· <span class="badge text-bg-warning">gäst</span>{% endif %}
+    </div>
+  </div>
+</div>
+{% if info and (info["summary"] or info["expertise"] or info["interests"] or info["phone"]) %}
+<div class="card mb-3"><div class="card-body py-2 small">
+  {% if info["summary"] %}<p class="mb-1">{{ info["summary"] }}</p>{% endif %}
+  {% if info["expertise"] %}<div><span class="text-secondary">Expertis:</span> {{ info["expertise"] }}</div>{% endif %}
+  {% if info["interests"] %}<div><span class="text-secondary">Intressen:</span> {{ info["interests"] }}</div>{% endif %}
+  {% if info["phone"] %}<div><span class="text-secondary">Telefon:</span> {{ info["phone"] }}</div>{% endif %}
+</div></div>
+{% endif %}
+<ul class="nav nav-tabs" role="tablist">
+  <li class="nav-item">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#storyline" type="button" role="tab">
+      Storyline <span class="badge text-bg-secondary">{{ n_own + n_others }}</span>
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#communities" type="button" role="tab">
+      I communities <span class="badge text-bg-secondary">{{ n_comm }}</span>
+    </button>
+  </li>
+</ul>
+<div class="tab-content border border-top-0 rounded-bottom">
+  <div class="tab-pane fade show active" id="storyline" role="tabpanel">
+    <ul class="nav nav-pills gap-2 p-2" role="tablist">
+      <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#egen" type="button" role="tab">
+          Egen storyline <span class="badge text-bg-light text-dark">{{ n_own }}</span>
+        </button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pa-andras" type="button" role="tab">
+          På andras storyline <span class="badge text-bg-light text-dark">{{ n_others }}</span>
+        </button>
+      </li>
+    </ul>
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="egen" role="tabpanel">
+        <div class="p-2">
+          {% for tid, g in own_groups %}
+          <div class="card mb-1" role="button" style="cursor:pointer" onclick="location.href='/arkiv/t/{{ tid }}'">
+            <div class="card-body py-2">
+              <div class="small text-secondary">
+                {% if g["starter"] %}{{ g["starter"]["created_at"]|svtid }} · {% endif %}öppna tråden →
+              </div>
+              <div><span class="badge text-bg-primary">Inlägg</span>
+                <span class="body body-clamp">{{ render_body(g["starter"]["body_rich"]) or g["starter"]["body_plain"] if g["starter"] else "(trådstart saknas)" }}</span></div>
+            </div>
+          </div>
+          {% if g["comments"] %}
+          <div class="replies lvl1 mb-2">
+            {% for c in g["comments"] %}
+            <div class="card mb-1" role="button" style="cursor:pointer" onclick="location.href='/arkiv/t/{{ tid }}#m{{ c['id'] }}'">
+              <div class="card-body py-2">
+                <div class="small text-secondary">↳ ditt svar · {{ c["created_at"]|svtid }}</div>
+                <div class="small body body-clamp">{{ render_body(c["body_rich"]) or c["body_plain"] }}</div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% else %}
+          <p class="text-secondary mb-0">Inga egna storyline-inlägg.</p>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="tab-pane fade" id="pa-andras" role="tabpanel">
+        {{ slist(story_others, "Inga kommentarer på andras storylines.", true) }}
+      </div>
+    </div>
+  </div>
+  <div class="tab-pane fade" id="communities" role="tabpanel">
+    <div class="list-group list-group-flush" id="commlist">{% include "archive/_user_comm_items.html" %}</div>
+    {% if not community %}<p class="text-secondary p-3 mb-0">Inga community-inlägg från användaren i arkivet.</p>{% endif %}
+    <div id="comm-loading" class="text-center text-secondary small py-2 d-none">laddar fler…</div>
+    <div id="comm-sentinel" data-uid="{{ uid }}" data-offset="{{ community|length }}" data-total="{{ n_comm }}"></div>
+  </div>
+</div>
+<script>
+(function () {
+  const list = document.getElementById("commlist");
+  const s = document.getElementById("comm-sentinel");
+  if (!s) return;
+  const loadingEl = document.getElementById("comm-loading");
+  const uid = s.dataset.uid, total = +s.dataset.total;
+  let offset = +s.dataset.offset, loading = false, done = offset >= total;
+  async function more() {
+    if (loading || done) return;
+    loading = true; loadingEl.classList.remove("d-none");
+    try {
+      const html = await (await fetch(`/arkiv/u/${uid}/community?offset=${offset}`)).text();
+      if (html.trim()) list.insertAdjacentHTML("beforeend", html);
+      offset = list.querySelectorAll(".list-group-item").length;
+      done = offset >= total || !html.trim();
+    } catch (e) { /* nätfel - försök igen vid nästa skroll */ }
+    loading = false; loadingEl.classList.add("d-none");
+  }
+  new IntersectionObserver(es => { if (es[0].isIntersecting) more(); },
+                           { rootMargin: "400px" }).observe(s);
+})();
+</script>
+{% endblock %}

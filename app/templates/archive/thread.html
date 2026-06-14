@@ -1,58 +1,117 @@
 {% extends "archive/base.html" %}
 {% block title %}Tråd - Viva-arkiv{% endblock %}
+{% macro userlinks(rows) %}
+{%- for r in rows -%}
+  {%- if r["name"] -%}<a href="/arkiv/u/{{ r['uid'] }}" class="text-primary">{{ r["name"] }}</a>
+  {%- else -%}<span class="text-secondary">okänd</span>{%- endif -%}
+  {%- if not loop.last %}, {% endif -%}
+{%- endfor -%}
+{% endmacro %}
+{% macro typebadge(t) %}
+{%- if t == "question" %}<span class="badge text-bg-primary">Fråga</span>
+{%- elif t == "announcement" %}<span class="badge badge-announcement">📣 Meddelande</span>
+{%- elif t == "poll" %}<span class="badge text-bg-secondary">Omröstning</span>
+{%- elif t == "system" %}<span class="badge text-bg-light text-secondary border">System</span>
+{%- endif %}
+{% endmacro %}
+{# Avatar via /arkiv/avatar/{uid}: riktig mugshot om den finns, annars en
+   genererad SVG-initialcirkel (routen sköter fallbacken). #}
+{% macro avatar(name, uid) %}
+<img class="avatar rounded-circle flex-shrink-0" loading="lazy"
+     src="/arkiv/avatar/{{ uid or 0 }}?n={{ (name or '?')|urlencode }}"
+     title="{{ name or 'Okänd' }}" alt="">
+{% endmacro %}
 {% block content %}
 {% if group %}<p><a href="/arkiv/c/{{ group['id'] }}">← {{ group["full_name"] }}</a></p>{% endif %}
-{% for m in msgs %}
-{% set depth = depths.get(m["id"], 0) %}
-<div class="card mb-2 lvl{{ [depth, 5]|min }}" id="m{{ m['id'] }}"
-     style="margin-left: {{ [depth, 6]|min * 1.5 }}rem">
-  <div class="card-body py-2">
+{% if not tree %}<p>Inga meddelanden i tråden.</p>{% endif %}
+{% for node in tree recursive %}
+{% set m = by_id[node["id"]] %}
+{% set depth = loop.depth0 %}
+<div class="card mb-2" id="m{{ m['id'] }}">
+  <div class="card-body py-2 d-flex gap-2">
+    {% if m["sender_id"] %}<a href="/arkiv/u/{{ m['sender_id'] }}">{{ avatar(m["sender"], m["sender_id"]) }}</a>{% else %}{{ avatar(m["sender"], 0) }}{% endif %}
+    <div class="flex-grow-1 min-w-0">
     <div class="small text-secondary">
-      {{ m["sender"] or "Okänd" }} · {{ m["created_at"] }}{% if depth %} · svar{% endif %}
-      {% if m["message_type"] in ["announcement", "question"] %}
-        <span class="badge text-bg-info">{{ m["message_type"] }}</span>
-      {% endif %}
+      {% if m["sender_id"] %}<a href="/arkiv/u/{{ m['sender_id'] }}" class="fw-semibold text-reset text-decoration-none">{{ m["sender"] or "Okänd" }}</a>{% else %}<span class="fw-semibold">{{ m["sender"] or "Okänd" }}</span>{% endif %} · {{ m["created_at"]|svtid }}{% if depth %} · svar{% endif %}{% if m["web_url"] %} · <a href="{{ m['web_url'] }}" rel="noopener noreferrer" target="_blank" title="Öppna i Viva Engage">↗ Viva</a>{% endif %}
       {% if m["privacy"] and m["privacy"] != "public" %}
         <span class="badge text-bg-secondary">{{ m["privacy"] }}</span>
       {% endif %}
+      {% if m["id"] == m["thread_id"] and seen_count is not none %}
+        <span class="float-end">👁 Sett av {{ seen_count }}</span>
+      {% endif %}
     </div>
-    {% if m["title"] %}<div class="fw-semibold">{{ m["title"] }}</div>{% endif %}
+    {% if m["message_type"] in ["question", "announcement", "poll", "system"] %}
+      <div class="mt-1">{{ typebadge(m["message_type"]) }}</div>
+    {% endif %}
+    {% if m["title"] %}
+      <div class="fw-semibold {% if m['message_type'] in ['question', 'announcement'] %}fs-5{% endif %}">{{ m["title"] }}</div>
+    {% endif %}
     {% if m["shared_message_id"] %}
-      <div class="small text-secondary">↪ delning av ett annat inlägg
-        {% if shared_links.get(m["shared_message_id"]) %}
-          (<a href="/arkiv/t/{{ shared_links[m['shared_message_id']] }}#m{{ m['shared_message_id'] }}">visa originalet</a>)
-        {% endif %}
+      {% set sp = shared_posts.get(m["shared_message_id"]) %}
+      <div class="border-start border-3 ps-2 my-1">
+        <div class="small text-secondary">↪ delade {% if sp and sp["sender"] %}{{ sp["sender"] }}s inlägg{% else %}ett inlägg{% endif %}{% if shared_links.get(m["shared_message_id"]) %}
+          (<a href="/arkiv/t/{{ shared_links[m['shared_message_id']] }}#m{{ m['shared_message_id'] }}">visa originalet →</a>){% endif %}</div>
+        {% if sp and sp["body_plain"] %}<div class="small">{{ sp["body_plain"]|truncate(220) }}</div>{% endif %}
       </div>
     {% endif %}
-    <div class="body">{{ m["body_plain"] or "" }}</div>
+    <div class="body">{{ bodies.get(m["id"], "") }}</div>
     {% if polls.get(m["id"]) %}
       <div class="small mt-1"><b>Omröstning:</b>
         <ul class="mb-0">{% for a in polls[m["id"]] %}<li>{{ a }}</li>{% endfor %}</ul>
       </div>
     {% endif %}
     {% if mentions.get(m["id"]) %}
-      <div class="small text-primary">@ {{ mentions[m["id"]]|join(", ") }}</div>
+      <div class="small text-secondary">Även aviserade: {{ userlinks(mentions[m["id"]]) }}</div>
     {% endif %}
-    {% if m["like_count"] %}
-      <div class="small">👍 {{ m["like_count"] }}{% if likes.get(m["id"]) %} - {{ likes[m["id"]]|join(", ") }}{% endif %}</div>
+    {% if reactions.get(m["id"]) %}
+      <div class="mt-1 d-flex flex-wrap gap-1">
+        {% for r in reactions[m["id"]] %}
+        {% set names = reactors.get(m['id'], {}).get(r['type'], []) %}
+        <span class="badge rounded-pill text-bg-light border fw-normal reaction"
+              data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="reaction-tip"
+              data-bs-title="<div class='fw-semibold mb-1'>{{ emoji.get(r['type'], '•') }} {{ rlabel.get(r['type'], r['type']) }} · {{ r['count'] }}</div>{% for n in names %}<div>{{ n }}</div>{% endfor %}{% if r['count'] > names|length %}<div class='text-secondary fst-italic'>…och {{ r['count'] - names|length }} till</div>{% endif %}">
+          {{ emoji.get(r["type"], "•") }} {{ r["count"] }}
+        </span>
+        {% endfor %}
+      </div>
+    {% elif m["like_count"] %}
+      <div class="small">👍 {{ m["like_count"] }}{% if likes.get(m["id"]) %} - {{ userlinks(likes[m["id"]]) }}{% endif %}</div>
     {% endif %}
     {% if atts.get(m["id"]) %}
       {% for a in atts[m["id"]] %}
-      <div class="small mt-1">
-        📎
-        {% if a["local_path"] %}
-          <a href="/arkiv/fil/{{ a['local_path'] }}">{{ a["name"] }}</a> <span class="text-secondary">(arkiverad)</span>
-        {% elif a["web_url"] %}
-          <a href="{{ a['web_url'] }}" rel="noopener">{{ a["name"] or a["web_url"] }}</a> <span class="text-secondary">(länk)</span>
-        {% else %}
-          {{ a["name"] }}
-        {% endif %}
-      </div>
+      {% if a["type"] == "image" and a["local_path"] %}
+        <a href="/arkiv/fil/{{ a['local_path'] }}" target="_blank" rel="noopener" class="d-inline-block mt-2">
+          <img src="/arkiv/fil/{{ a['local_path'] }}" alt="{{ a['name'] or '' }}" loading="lazy"
+               class="rounded border" style="max-width:100%;max-height:22rem;object-fit:contain">
+        </a>
+      {% elif a["type"] == "ymodule" and a["web_url"] %}
+        <a href="{{ a['web_url'] }}" rel="noopener noreferrer" target="_blank"
+           class="linkcard d-flex gap-2 align-items-center mt-2 p-2 border rounded text-decoration-none text-reset">
+          {% if a["thumb_local"] %}<img src="/arkiv/fil/{{ a['thumb_local'] }}" alt="" loading="lazy"
+               class="rounded flex-shrink-0" style="width:4rem;height:4rem;object-fit:cover">{% endif %}
+          <span class="min-w-0">
+            <span class="d-block fw-semibold text-truncate">{{ a["name"] or a["web_url"] }}</span>
+            {% if a["description"] %}<span class="d-block small text-secondary linkcard-desc">{{ a["description"] }}</span>{% endif %}
+            <span class="d-block small text-secondary mt-1">🔗 {{ a["web_url"]|domain }}</span>
+          </span>
+        </a>
+      {% else %}
+        <div class="small mt-1">
+          📎
+          {% if a["local_path"] %}
+            <a href="/arkiv/fil/{{ a['local_path'] }}">{{ a["name"] }}</a> <span class="text-secondary">(arkiverad)</span>
+          {% elif a["web_url"] %}
+            <a href="{{ a['web_url'] }}" rel="noopener">{{ a["name"] or a["web_url"] }}</a> <span class="text-secondary">(länk)</span>
+          {% else %}
+            {{ a["name"] }}
+          {% endif %}
+        </div>
+      {% endif %}
       {% endfor %}
     {% endif %}
+    </div>
   </div>
 </div>
-{% else %}
-<p>Inga meddelanden i tråden.</p>
+{% if node["children"] %}<div class="replies lvl{{ (depth % 5) + 1 }}">{{ loop(node["children"]) }}</div>{% endif %}
 {% endfor %}
 {% endblock %}

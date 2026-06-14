@@ -1,0 +1,31 @@
+{% extends "archive/base.html" %}
+{% block title %}Nekade bilagor - Viva-arkiv{% endblock %}
+{% block content %}
+<h1 class="h4">Nekade bilagor</h1>
+<p class="text-secondary">
+  Filbilagor som bilage-passet fick åtkomst nekad på (kunde inte laddas ner).
+  {% if entries %}{{ entries|length }} st.{% endif %}
+</p>
+<div class="list-group">
+  {% for e in entries %}
+  <div class="list-group-item">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <div class="min-w-0">
+        📎 <b>{{ e["name"] }}</b> <span class="text-secondary small">({{ e["type"] }})</span>
+      </div>
+      <div class="text-nowrap small">
+        {% if e["file_url"] %}<a href="{{ e['file_url'] }}" rel="noopener noreferrer" target="_blank">öppna filen ↗</a>{% endif %}
+        {% if e["thread_id"] %}
+          · <a href="/arkiv/t/{{ e['thread_id'] }}{% if e['message_id'] %}#m{{ e['message_id'] }}{% endif %}">arkiv-inlägg →</a>
+        {% endif %}
+        {% if e["post_web_url"] %}
+          · <a href="{{ e['post_web_url'] }}" rel="noopener noreferrer" target="_blank">inlägg i Viva ↗</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-secondary">Inga nekade bilagor loggade. (Kör bilage-passet först - då loggas ev. nekade här.)</p>
+  {% endfor %}
+</div>
+{% endblock %}

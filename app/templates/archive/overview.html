@@ -1,0 +1,60 @@
+{% extends "archive/base.html" %}
+{% block title %}Översikt - Viva-arkiv{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Översikt</h1>
+<div class="row text-center g-2 mb-4">
+  {% set cards = [("Meddelanden", totals["msgs"]), ("Trådar", totals["threads"]),
+                  ("Användare", totals["users"]), ("Communities", totals["communities"]),
+                  ("Bilagor", totals["attachments"])] %}
+  {% for label, val in cards %}
+  <div class="col">
+    <div class="card"><div class="card-body py-2">
+      <div class="h5 mb-0">{{ "{:,}".format(val).replace(",", " ") }}</div>
+      <div class="small text-secondary">{{ label }}</div>
+    </div></div>
+  </div>
+  {% endfor %}
+</div>
+<p class="text-secondary">Spänner {{ totals["first"]|svtid }} – {{ totals["last"]|svtid }}.</p>
+
+<div class="row">
+  <div class="col-md-6 mb-4">
+    <h2 class="h6">Mest aktiva communities</h2>
+    <div class="list-group">
+      {% for c in top_communities %}
+      <a class="list-group-item list-group-item-action d-flex justify-content-between"
+         href="/arkiv/c/{{ c['id'] }}">
+        <span>{{ c["full_name"] }}</span>
+        <span class="text-secondary">{{ c["message_count"] }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="col-md-6 mb-4">
+    <h2 class="h6">Flitigaste avsändare</h2>
+    <div class="list-group">
+      {% for p in top_posters %}
+      <a class="list-group-item list-group-item-action d-flex justify-content-between"
+         href="/arkiv/u/{{ p['id'] }}">
+        <span>{{ p["name"] or "Okänd" }}</span>
+        <span class="text-secondary">{{ p["n"] }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<h2 class="h6">Aktivitet per år <span class="small text-secondary fw-normal">(klicka för att lista inläggen)</span></h2>
+<div class="mb-3">
+  {% for y in per_year %}
+  <a class="d-flex align-items-center gap-2 mb-1 text-reset text-decoration-none"
+     href="/arkiv/sok?fran={{ y['yr'] }}-01-01&till={{ y['yr'] }}-12-31">
+    <span class="small text-secondary" style="width:3rem">{{ y["yr"] }}</span>
+    <div class="progress flex-grow-1" style="height:1rem">
+      <div class="progress-bar" style="width:{{ (100 * y['n'] / ymax)|round(1) }}%"></div>
+    </div>
+    <span class="small text-secondary" style="width:4rem; text-align:right">{{ y["n"] }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

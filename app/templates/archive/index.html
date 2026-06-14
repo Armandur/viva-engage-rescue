@@ -1,14 +1,84 @@
 {% extends "archive/base.html" %}
+{% import "archive/_macros.html" as m %}
 {% block content %}
 <p class="text-secondary">{{ stats["m"] }} meddelanden från {{ communities|length }} communities,
   {{ stats["u"] }} användare.</p>
-<div class="list-group">
-  {% for c in communities %}
-  <a class="list-group-item list-group-item-action d-flex justify-content-between"
-     href="/arkiv/c/{{ c['id'] }}">
-    <span>{{ c["full_name"] }}</span>
-    <span class="badge text-bg-secondary rounded-pill">{{ c["message_count"] }}</span>
-  </a>
-  {% endfor %}
+
+<div class="mb-2 small d-flex flex-wrap align-items-center gap-3">
+  <span class="text-secondary">Visa taggar (bocka ur för att dölja):</span>
+  <label><input type="checkbox" class="tagfilter" value="kornet" checked> Kornet</label>
+  <label><input type="checkbox" class="tagfilter" value="all-company" checked> 🏛 All Company</label>
+  <label><input type="checkbox" class="tagfilter" value="privat" checked> 🔒 Privat</label>
+  <label><input type="checkbox" class="tagfilter" value="modererad" checked> Modererad</label>
+  <label><input type="checkbox" class="tagfilter" value="ingen-atkomst" checked> Ej åtkomstbar</label>
 </div>
+
+<table class="table table-sm table-hover align-middle" id="commtable">
+  <thead>
+    <tr>
+      <th data-sort="name">Namn ↕</th>
+      <th>Taggar</th>
+      <th class="text-end" data-sort="messages">Meddelanden ↕</th>
+      <th class="text-end" data-sort="threads">Trådar ↕</th>
+      <th class="text-end" data-sort="members">Medlemmar ↕</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in communities %}
+    {% set tags = [] %}
+    {% if c["restricted_posting"] %}{% set _ = tags.append("kornet") %}{% endif %}
+    {% if c["company_group"] %}{% set _ = tags.append("all-company") %}{% endif %}
+    {% if c["privacy"] == "private" %}{% set _ = tags.append("privat") %}{% endif %}
+    {% if c["moderated"] %}{% set _ = tags.append("modererad") %}{% endif %}
+    {% if c["accessible"] == 0 %}{% set _ = tags.append("ingen-atkomst") %}{% endif %}
+    <tr role="button" onclick="location.href='/arkiv/c/{{ c['id'] }}'"
+        data-name="{{ (c['full_name'] or '')|lower }}"
+        data-messages="{{ c['message_count'] }}"
+        data-threads="{{ c['thread_count'] }}"
+        data-members="{{ c['member_count'] if c['member_count'] is not none else -1 }}"
+        data-tags="{{ tags|join(' ') }}">
+      <td class="fw-semibold">{{ c["full_name"] }}</td>
+      <td>{{ m.commbadges(c) }}</td>
+      <td class="text-end">{{ "{:,}".format(c["message_count"]).replace(",", " ") }}</td>
+      <td class="text-end text-secondary">{{ "{:,}".format(c["thread_count"]).replace(",", " ") }}</td>
+      <td class="text-end text-secondary">{{ "{:,}".format(c["member_count"]).replace(",", " ") if c["member_count"] is not none else "–" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+(function () {
+  const table = document.getElementById("commtable");
+  const tbody = table.querySelector("tbody");
+  const rows = [...tbody.querySelectorAll("tr")];
+
+  const boxes = [...document.querySelectorAll(".tagfilter")];
+  function applyFilter() {
+    const hidden = new Set(boxes.filter(b => !b.checked).map(b => b.value));
+    rows.forEach(r => {
+      const tags = (r.dataset.tags || "").split(" ").filter(Boolean);
+      r.style.display = tags.some(t => hidden.has(t)) ? "none" : "";
+    });
+  }
+  boxes.forEach(b => b.addEventListener("change", applyFilter));
+
+  let sortKey = null, asc = true;
+  table.querySelectorAll("th[data-sort]").forEach(th => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      asc = sortKey === key ? !asc : (key === "name");
+      sortKey = key;
+      const numeric = key !== "name";
+      rows.sort((a, b) => {
+        let x = a.dataset[key], y = b.dataset[key];
+        if (numeric) { x = +x; y = +y; }
+        return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1);
+      });
+      rows.forEach(r => tbody.appendChild(r));
+    });
+  });
+})();
+</script>
 {% endblock %}

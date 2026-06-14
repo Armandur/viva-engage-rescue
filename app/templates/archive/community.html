@@ -1,17 +1,115 @@
 {% extends "archive/base.html" %}
+{% import "archive/_macros.html" as m %}
 {% block title %}{{ info["full_name"] if info else "Community" }} - Viva-arkiv{% endblock %}
 {% block content %}
-<h1 class="h4">{{ info["full_name"] if info else "Community" }}</h1>
+<h1 class="h4">{{ info["full_name"] if info else "Community" }} {% if info %}{{ m.commbadges(info) }}{% endif %}</h1>
+{% if info and info["restricted_posting"] %}<p class="small text-info">Kornet-kopplat ämne - Viva-inläggen användes som kommentarsfält på intranätet Kornet och får inga nya inlägg.</p>{% endif %}
 {% if info and info["description"] %}<p class="text-secondary">{{ info["description"] }}</p>{% endif %}
-<p class="text-secondary">{{ threads|length }} trådar</p>
-<div class="list-group">
-  {% for t in threads %}
-  <a class="list-group-item list-group-item-action" href="/arkiv/t/{{ t['thread_id'] }}">
-    <div>{{ (t["starter"] or "(trådstart saknas i dumpen)")|truncate(110) }}</div>
-    <small class="text-secondary">
-      {{ t["starter_by"] or "Okänd" }} · {{ t["n"] }} inlägg · senast {{ t["last_at"] }}
-    </small>
-  </a>
-  {% endfor %}
+{% if about %}<div class="card mb-3"><div class="card-body py-2"><div class="small text-secondary mb-1">Om</div><div class="body">{{ about }}</div></div></div>{% endif %}
+{% if pinned %}
+<div class="mb-3">
+  <b class="small">📌 Fästa länkar</b>
+  <ul class="mb-0">
+    {% for p in pinned %}<li><a href="{{ p['url'] }}" rel="noopener noreferrer" target="_blank">{{ p["title"] or p["url"] }}</a></li>{% endfor %}
+  </ul>
 </div>
+{% endif %}
+{% if members %}
+{% if admins %}
+<div class="mb-2">
+  <div class="text-secondary small mb-1">Administratörer</div>
+  <div class="d-flex flex-wrap gap-2">
+    {% for a in admins %}
+    <a href="/arkiv/u/{{ a['user_id'] }}"
+       class="d-flex align-items-center gap-2 text-decoration-none border rounded p-2" style="min-width:13rem">
+      <img src="/arkiv/avatar/{{ a['user_id'] }}?n={{ a['name']|urlencode }}"
+           class="avatar rounded-circle flex-shrink-0" alt="" style="width:2.5rem;height:2.5rem">
+      <span class="min-w-0">
+        <span class="d-block fw-semibold text-body text-truncate">{{ a["name"] }}</span>
+        <span class="d-block text-secondary small text-truncate">{{ a["job_title"] or "Administratör" }}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+<p class="text-secondary mb-1">
+  👥 {{ info["member_count"] or members|length }} medlemmar
+  · <a data-bs-toggle="collapse" href="#members-list" role="button">Visa medlemmar →</a>
+</p>
+<div class="collapse mb-3" id="members-list">
+  <table class="table table-sm table-hover align-middle mb-0">
+    <thead>
+      <tr><th></th><th>Namn</th><th>Titel</th><th>Avdelning</th><th>Roll</th></tr>
+    </thead>
+    <tbody>
+      {% for mb in members %}
+      <tr role="button" onclick="location.href='/arkiv/u/{{ mb['user_id'] }}'">
+        <td style="width:2.5rem"><img src="/arkiv/avatar/{{ mb['user_id'] }}?n={{ mb['name']|urlencode }}"
+            class="avatar rounded-circle" alt="" style="width:2rem;height:2rem"></td>
+        <td class="fw-semibold">{{ mb["name"] }}</td>
+        <td class="text-secondary">{{ mb["job_title"] or "" }}</td>
+        <td class="text-secondary">{{ mb["department"] or "" }}</td>
+        <td>{% if mb["is_admin"] %}<span class="badge text-bg-warning text-dark">★ admin</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+<p class="text-secondary">{{ n_threads }} trådar</p>
+<div class="list-group" id="threadlist">{% include "archive/_thread_items.html" %}</div>
+<div id="thread-loading" class="text-center text-secondary small py-3 d-none">laddar fler trådar…</div>
+<div id="thread-sentinel" data-group="{{ gid }}" data-offset="{{ threads|length }}" data-total="{{ n_threads }}"></div>
+
+<script>
+(function () {
+  const list = document.getElementById("threadlist");
+  const sentinel = document.getElementById("thread-sentinel");
+  const loadingEl = document.getElementById("thread-loading");
+  const gid = sentinel.dataset.group;
+  const total = +sentinel.dataset.total;
+  let offset = +sentinel.dataset.offset;
+  let loading = false, done = offset >= total;
+
+  async function loadMore() {
+    if (loading || done) return;
+    loading = true; loadingEl.classList.remove("d-none");
+    try {
+      const html = await (await fetch(`/arkiv/c/${gid}/trader?offset=${offset}`)).text();
+      if (html.trim()) list.insertAdjacentHTML("beforeend", html);
+      offset = list.querySelectorAll("a.list-group-item").length;
+      done = offset >= total || !html.trim();
+    } catch (e) { /* nätfel - försök igen vid nästa skroll */ }
+    loading = false; loadingEl.classList.add("d-none");
+  }
+
+  new IntersectionObserver(es => { if (es[0].isIntersecting) loadMore(); },
+                           { rootMargin: "600px" }).observe(sentinel);
+
+  // Hash speglar tråden närmast toppen, så man kan dela/återkomma till sin plats.
+  let hashTimer;
+  function updateHash() {
+    for (const it of list.querySelectorAll("a.list-group-item")) {
+      if (it.getBoundingClientRect().bottom > 90) {
+        history.replaceState(null, "", "#" + it.id); break;
+      }
+    }
+  }
+  addEventListener("scroll", () => {
+    clearTimeout(hashTimer); hashTimer = setTimeout(updateHash, 200);
+  }, { passive: true });
+
+  // Vid laddning med #t<id>: ladda sidor tills tråden finns, scrolla dit.
+  async function gotoHash() {
+    const h = location.hash.slice(1);
+    if (!/^t\d+$/.test(h)) return;
+    let guard = 0;
+    while (!document.getElementById(h) && !done && guard++ < 40) await loadMore();
+    const el = document.getElementById(h);
+    if (el) el.scrollIntoView();
+  }
+  gotoHash();
+})();
+</script>
 {% endblock %}

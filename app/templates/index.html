@@ -12,12 +12,25 @@
   <style>
     body { max-width: 960px; }
     #log { max-height: 240px; overflow: auto; font-size: .8rem; white-space: pre-wrap; }
+    .avstrip { position: relative; overflow: hidden; height: 4rem;
+               background: var(--bs-tertiary-bg); border-radius: .375rem; }
+    .avtrack { display: flex; gap: 1.25rem; align-items: center; position: absolute;
+               left: 0; top: .5rem; white-space: nowrap; will-change: transform; }
+    .avitem { display: flex; flex-direction: column; align-items: center; width: 3.4rem; }
+    .avitem img { width: 2.5rem; height: 2.5rem; border-radius: 50%; object-fit: cover;
+                  background: var(--bs-secondary-bg); }
+    .avitem span { font-size: .65rem; color: var(--bs-secondary-color); margin-top: .15rem;
+                   max-width: 3.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body class="container py-4">
   <div class="d-flex align-items-baseline justify-content-between mb-3">
     <h1 class="h4 mb-0">Viva Engage-dump</h1>
-    <a href="/arkiv">öppna arkivet →</a>
+    <div class="small">
+      <a href="/arkiv/nekade">nekade bilagor</a> ·
+      <a href="/arkiv/exempel">exempel</a> ·
+      <a href="/arkiv">öppna arkivet →</a>
+    </div>
   </div>
 
   <div class="card mb-3">
@@ -42,8 +55,18 @@
     <div class="card-body">
       <div class="row text-center g-2" id="stats"></div>
       <div class="mt-3" id="controls"></div>
+      <div class="mt-2" id="group-picker"></div>
+      <div id="pipeline-line" class="mt-3"></div>
       <div id="run-line" class="mt-3"></div>
       <div id="thread-line" class="mt-3"></div>
+      <div id="enrich-line" class="mt-3"></div>
+      <div id="storyline-line" class="mt-3"></div>
+      <div id="download-line" class="mt-3"></div>
+      <div id="cinfo-line" class="mt-3"></div>
+      <div id="users-line" class="mt-3"></div>
+      <div id="reactors-line" class="mt-3"></div>
+      <div id="avatar-ticker" class="mt-2"></div>
+      <div id="update-line" class="mt-2"></div>
       <hr>
       <div id="archive-line"></div>
     </div>
@@ -60,7 +83,7 @@
     <div class="card-body">
       <h2 class="h6">Communities</h2>
       <table class="table table-sm mb-0">
-        <thead><tr><th>Namn</th><th>Sidor</th><th>Status</th></tr></thead>
+        <thead><tr><th>Namn</th><th class="text-end">Meddelanden</th><th class="text-end">Trådar</th><th class="text-end">Sidor</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -68,6 +91,37 @@
 
 <script>
 async function post(url) { await fetch(url, { method: "POST" }); refresh(); }
+// Starta ett pass; om communities valts i väljaren skickas de som ?groups=...
+async function start(kind) {
+  const sel = document.getElementById("groupsel");
+  const ids = sel ? [...sel.selectedOptions].map(o => o.value) : [];
+  const qs = ids.length ? "?groups=" + encodeURIComponent(ids.join(",")) : "";
+  await post(`/start/${kind}${qs}`);
+}
+function startPipeline() {
+  if (confirm("Kör hela kedjan i serie (dump → threads → build → storylines → " +
+      "build → enrich → community-info → användare → bilagor → build)?\n\n" +
+      "Tar flera timmar. Håll en Viva-flik öppen så token matas automatiskt.")) {
+    start("pipeline");
+  }
+}
+let _pickerOpen = false;
+function renderGroupPicker(rows, running) {
+  const box = document.getElementById("group-picker");
+  if (running) { box.innerHTML = ""; return; }
+  const sel = document.getElementById("groupsel");
+  const chosen = sel ? new Set([...sel.selectedOptions].map(o => o.value)) : new Set();
+  if (!_pickerOpen) {
+    box.innerHTML = `<button class="btn btn-link btn-sm p-0" onclick="_pickerOpen=true;refresh()">▸ Begränsa till vissa communities (valfritt)</button>`;
+    return;
+  }
+  const opts = rows.filter(r => r.id > 0)
+    .map(r => `<option value="${r.id}" ${chosen.has(String(r.id)) ? "selected" : ""}>${r.name} (${r.messages})</option>`)
+    .join("");
+  box.innerHTML =
+    `<div class="small text-secondary mb-1">▾ Markera en eller flera (Ctrl/Cmd-klick). Tomt = alla. Gäller nästa start.</div>` +
+    `<select multiple id="groupsel" class="form-select form-select-sm" size="8">${opts}</select>`;
+}
 function fmtDur(s) {
   if (s == null) return "";
   if (s < 0) return "utgången";
@@ -84,6 +138,69 @@ function stat(value, label) {
   return `<div class="col"><div class="h4 mb-0">${value}</div>` +
          `<small class="text-secondary">${label}</small></div>`;
 }
+// ---- Avatar-marquee (höger -> vänster, kontinuerlig) ----
+// Modell: en token per unik avatar cirkulerar. Varje avatar finns antingen i
+// spåret ELLER i kön - aldrig båda - så samma person kan fysiskt inte synas
+// två gånger samtidigt. När en rullar ut till vänster läggs den sist i kön och
+// kan komma in igen från höger. Bilder köas först NÄR de laddat (aldrig pop).
+// rAF-loop, DOM byggs aldrig om -> inget hopp.
+const AV_SPEED = 0.045, AV_GAP = 20;  // px/ms (~45 px/s), gap = 1.25rem
+let _avQueue = [], _avSeen = new Set(), _avOffset = 0, _avLast = 0, _avRAF = null;
+function avEnsureDom() {
+  const tick = document.getElementById("avatar-ticker");
+  if (tick.querySelector(".avstrip")) return;
+  tick.innerHTML = '<div class="avstrip"><div class="avtrack"></div></div>';
+  _avOffset = tick.querySelector(".avstrip").clientWidth;  // börja utanför höger kant
+}
+function avFeed(recent) {
+  for (const r of (recent || [])) {
+    if (_avSeen.has(r.id)) continue;
+    _avSeen.add(r.id);
+    const im = new Image();
+    im.onload = () => _avQueue.push(r);   // bara färdigladdade -> aldrig pop
+    im.src = `/arkiv/avatar/${r.id}`;
+  }
+}
+function _avItem(r) {
+  const el = document.createElement("div");
+  el.className = "avitem";
+  el.dataset.id = r.id; el.dataset.name = r.name || "";
+  el.innerHTML = `<img src="/arkiv/avatar/${r.id}" alt=""><span></span>`;
+  el.querySelector("span").textContent = r.name || "";
+  return el;
+}
+function avFrame(ts) {
+  const tick = document.getElementById("avatar-ticker");
+  const strip = tick && tick.querySelector(".avstrip");
+  const track = tick && tick.querySelector(".avtrack");
+  if (!strip || !track) { _avRAF = null; return; }
+  if (!_avLast) _avLast = ts;
+  _avOffset -= AV_SPEED * (ts - _avLast); _avLast = ts;
+  // släng det som rullat ut till vänster -> tillbaka sist i kön (cirkulerar)
+  while (track.firstChild) {
+    const el = track.firstChild;
+    const w = el.offsetWidth + AV_GAP;
+    if (_avOffset + w < 0) {
+      track.removeChild(el);
+      _avOffset += w;
+      _avQueue.push({ id: Number(el.dataset.id), name: el.dataset.name });
+    } else break;
+  }
+  // fyll på höger sida från kön tills innehållet täcker stripen + marginal
+  const cw = strip.clientWidth;
+  let guard = 0;
+  while (_avQueue.length && (_avOffset + track.scrollWidth) < cw + 80 && guard++ < 50)
+    track.appendChild(_avItem(_avQueue.shift()));
+  track.style.transform = `translateX(${_avOffset}px)`;
+  _avRAF = requestAnimationFrame(avFrame);
+}
+function avStart() { if (!_avRAF) { _avLast = 0; _avRAF = requestAnimationFrame(avFrame); } }
+function avStop() {
+  if (_avRAF) { cancelAnimationFrame(_avRAF); _avRAF = null; }
+  document.getElementById("avatar-ticker").innerHTML = "";
+  _avQueue = []; _avSeen.clear(); _avOffset = 0; _avLast = 0;
+}
+
 async function refresh() {
   let d;
   try { d = await (await fetch("/api/status")).json(); } catch { return; }
@@ -114,13 +231,42 @@ async function refresh() {
            `<button class="btn btn-outline-secondary btn-sm" onclick="post('/stop')">Stoppa</button>`;
   } else {
     ctrl =
-      `<button class="btn btn-primary btn-sm me-1" onclick="post('/start/dump')">Starta/återuppta dump</button>` +
-      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="post('/start/threads')">Komplettera trådar</button>` +
-      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="post('/start/update')">Uppdatera (hämta nya)</button>` +
-      `<button class="btn btn-outline-secondary btn-sm" onclick="post('/start/download')">Ladda ner bilagor</button>`;
+      `<button class="btn btn-primary btn-sm me-1" onclick="start('dump')">Starta/återuppta dump</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('threads')">Komplettera trådar</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('update')">Uppdatera (hämta nya)</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('download')">Ladda ner bilagor</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('enrich')">Berika (reaktioner + seen)</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('storylines')">Storylines</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('community_info')">Community-info</button>` +
+      `<button class="btn btn-outline-secondary btn-sm me-1" onclick="start('users')">Användarinfo + avatarer</button>` +
+      `<button class="btn btn-outline-secondary btn-sm" onclick="start('reactors')">Fulla reaktörer</button>` +
+      `<div class="mt-2"><button class="btn btn-warning btn-sm" onclick="startPipeline()">▶ Kör hela kedjan</button>` +
+      ` <small class="text-secondary">dump → … → build, i serie. Håll en Viva-flik öppen för token.</small></div>`;
   }
   document.getElementById("controls").innerHTML = ctrl;
+  renderGroupPicker(p.rows, !!running);
   document.getElementById("log").textContent = d.log || "-";
+
+  const pl = d.pipeline;
+  const plLine = document.getElementById("pipeline-line");
+  const plActive = running && running.kind === "pipeline";
+  const plStopped = (pl && (pl.status || "").startsWith("stoppad"));
+  if (pl && (plActive || plStopped)) {
+    const pct = pl.total ? Math.floor((100 * (pl.step - (plActive ? 1 : 0))) / pl.total) : 0;
+    const cls = plStopped ? "bg-danger" : pl.status === "klar" ? "bg-success" : "bg-warning";
+    const resume = (plStopped && !running)
+      ? `<div class="mt-1"><button class="btn btn-warning btn-sm" onclick="startPipeline()">` +
+        `▶ Återuppta kedjan</button> <small class="text-secondary">hoppar klara steg, ` +
+        `fortsätter från steg ${pl.step} (${pl.name})</small></div>`
+      : "";
+    plLine.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>Hela kedjan</b> steg ${pl.step}/${pl.total}: ${pl.name} <span class="text-secondary">(${pl.status})</span></span></div>` +
+      `<div class="progress mt-1" style="height:1.1rem"><div class="progress-bar ${cls}" style="width:${pct}%">${pct}%</div></div>` +
+      resume;
+  } else {
+    plLine.innerHTML = "";
+  }
 
   const th = d.threads;
   const tline = document.getElementById("thread-line");
@@ -139,6 +285,118 @@ async function refresh() {
     tline.innerHTML = "";
   }
 
+  const en = d.enrich;
+  const eline = document.getElementById("enrich-line");
+  if (en) {
+    const seen = en.done + en.skipped;
+    const pct = en.total ? Math.floor((100 * seen) / en.total) : 0;
+    const eta = en.eta_seconds != null ? fmtDur(en.eta_seconds) : "beräknar…";
+    const rate = en.rate_per_min != null ? " · " + en.rate_per_min + "/min" : "";
+    eline.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>Berikning (reaktioner + seen)</b> ${en.done} / ${en.total} trådar` +
+      (en.skipped ? ` · ${en.skipped} hoppade` : "") + `</span>` +
+      `<span>ETA ${eta}${rate}</span></div>` +
+      `<div class="progress mt-1" role="progressbar"><div class="progress-bar bg-info" style="width:${pct}%">${pct}%</div></div>`;
+  } else {
+    eline.innerHTML = "";
+  }
+
+  const sl = d.storylines;
+  const sline = document.getElementById("storyline-line");
+  if (sl) {
+    const pct = sl.total ? Math.floor((100 * sl.done) / sl.total) : 0;
+    const eta = sl.eta_seconds != null ? fmtDur(sl.eta_seconds) : "beräknar…";
+    const rate = sl.rate_per_min != null ? " · " + sl.rate_per_min + "/min" : "";
+    const fas = sl.phase === "discover" ? "upptäcker trådar" : "hämtar trådar";
+    sline.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>Storylines</b> (${fas}) ${sl.done} / ${sl.total}</span>` +
+      `<span>ETA ${eta}${rate}</span></div>` +
+      `<div class="progress mt-1" role="progressbar"><div class="progress-bar bg-secondary" style="width:${pct}%">${pct}%</div></div>`;
+  } else {
+    sline.innerHTML = "";
+  }
+
+  const dl = d.download;
+  const dline = document.getElementById("download-line");
+  if (dl) {
+    const pct = dl.total ? Math.floor((100 * dl.done) / dl.total) : 0;
+    const eta = dl.eta_seconds != null ? fmtDur(dl.eta_seconds) : "beräknar…";
+    const rate = dl.rate_per_min != null ? " · " + dl.rate_per_min + "/min" : "";
+    const extra = `${dl.downloaded} nya · ${dl.skipped} fanns` + (dl.denied ? ` · ${dl.denied} nekade` : "");
+    dline.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>Bilagor</b> ${dl.done} / ${dl.total} · ${extra}</span>` +
+      `<span>ETA ${eta}${rate}</span></div>` +
+      `<div class="progress mt-1" role="progressbar"><div class="progress-bar bg-success" style="width:${pct}%">${pct}%</div></div>`;
+  } else {
+    dline.innerHTML = "";
+  }
+
+  const ci = d.community_info;
+  const ciline = document.getElementById("cinfo-line");
+  if (ci) {
+    const pct = ci.total ? Math.floor((100 * ci.done) / ci.total) : 0;
+    const eta = ci.eta_seconds != null ? fmtDur(ci.eta_seconds) : "beräknar…";
+    const rate = ci.rate_per_min != null ? " · " + ci.rate_per_min + "/min" : "";
+    ciline.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>Community-info</b> ${ci.done} / ${ci.total} communities</span>` +
+      `<span>ETA ${eta}${rate}</span></div>` +
+      `<div class="progress mt-1" role="progressbar"><div class="progress-bar bg-secondary" style="width:${pct}%">${pct}%</div></div>`;
+  } else {
+    ciline.innerHTML = "";
+  }
+
+  const us = d.users;
+  const usline = document.getElementById("users-line");
+  if (us) {
+    const eta = us.eta_seconds != null ? fmtDur(us.eta_seconds) : "beräknar…";
+    const rate = us.rate_per_min != null ? " · " + us.rate_per_min + "/min" : "";
+    if (us.phase === "roster") {
+      usline.innerHTML =
+        `<div class="d-flex justify-content-between small">` +
+        `<span><b>Användarinfo</b> hämtar profiler: ${us.done}${rate}</span></div>` +
+        `<div class="progress mt-1"><div class="progress-bar progress-bar-striped progress-bar-animated bg-secondary" style="width:100%"></div></div>`;
+    } else {
+      const pct = us.total ? Math.floor((100 * us.done) / us.total) : 0;
+      usline.innerHTML =
+        `<div class="d-flex justify-content-between small">` +
+        `<span><b>Avatarer</b> ${us.done} / ${us.total}</span>` +
+        `<span>ETA ${eta}${rate}</span></div>` +
+        `<div class="progress mt-1"><div class="progress-bar bg-info" style="width:${pct}%">${pct}%</div></div>`;
+    }
+    if (us.phase === "avatars") { avEnsureDom(); avStart(); avFeed(us.recent); }
+  } else {
+    usline.innerHTML = ""; avStop();
+  }
+
+  const rx = d.reactors;
+  const rxLine = document.getElementById("reactors-line");
+  if (rx) {
+    const pct = rx.total ? Math.floor((100 * rx.done) / rx.total) : 0;
+    const eta = rx.eta_seconds != null ? fmtDur(rx.eta_seconds) : "beräknar…";
+    const rate = rx.rate_per_min != null ? " · " + rx.rate_per_min + "/min" : "";
+    rxLine.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>Fulla reaktörer</b> ${rx.done} / ${rx.total} · ${rx.upgraded} kompletterade</span>` +
+      `<span>ETA ${eta}${rate}</span></div>` +
+      `<div class="progress mt-1"><div class="progress-bar bg-info" style="width:${pct}%">${pct}%</div></div>`;
+  } else {
+    rxLine.innerHTML = "";
+  }
+
+  const up = d.update;
+  const uline = document.getElementById("update-line");
+  if (up && running && running.kind === "update") {
+    uline.innerHTML =
+      `<div class="small"><b>Uppdatering</b> - ${up.new_posts.toLocaleString("sv-SE")} nya inlägg ` +
+      `(${up.checked}/${up.total} communities genomgångna)</div>`;
+  } else {
+    uline.innerHTML = "";
+  }
+
   const a = d.archive || {};
   const built = a.built_at ? new Date(a.built_at * 1000).toLocaleString() : "aldrig byggt";
   document.getElementById("archive-line").innerHTML = a.building
@@ -147,9 +405,19 @@ async function refresh() {
       `<button class="btn btn-outline-secondary btn-sm" onclick="post('/build')">Bygg om arkivet</button>` +
       `<a href="/arkiv" class="ms-2">öppna →</a>`;
 
-  document.getElementById("rows").innerHTML = p.rows.map(r => {
+  let storyRow = "";
+  if (p.storyline) {
+    const s = p.storyline;
+    storyRow =
+      `<tr class="table-secondary"><td>📣 Storylines (alla användare)</td>` +
+      `<td class="text-end">${s.messages.toLocaleString("sv-SE")}</td>` +
+      `<td class="text-end">${s.threads.toLocaleString("sv-SE")}</td>` +
+      `<td class="text-end text-secondary">–</td>` +
+      `<td class="small text-secondary">${s.users_with} anv. · ${s.threads_discovered.toLocaleString("sv-SE")} upptäckta</td></tr>`;
+  }
+  document.getElementById("rows").innerHTML = storyRow + p.rows.map(r => {
     const c = r.status === "klar" ? "text-success" : r.status === "hoppad" ? "text-danger" : "text-warning";
-    return `<tr><td>${r.name}</td><td>${r.pages}</td><td class="${c}">${r.status}</td></tr>`;
+    return `<tr><td>${r.name}</td><td class="text-end">${r.messages.toLocaleString("sv-SE")}</td><td class="text-end">${r.threads.toLocaleString("sv-SE")}</td><td class="text-end text-secondary">${r.pages}</td><td class="${c}">${r.status}</td></tr>`;
   }).join("");
 }
 refresh();

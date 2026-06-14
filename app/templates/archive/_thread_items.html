@@ -1,0 +1,18 @@
+{% for t in threads %}
+<div class="list-group-item list-group-item-action" id="t{{ t['thread_id'] }}"
+     role="button" style="cursor:pointer" onclick="location.href='/arkiv/t/{{ t['thread_id'] }}'">
+  <div>
+    {% if t["message_type"] == "question" %}<span class="badge text-bg-primary">Fråga</span>
+    {% elif t["message_type"] == "announcement" %}<span class="badge badge-announcement">📣 Meddelande</span>
+    {% elif t["message_type"] == "poll" %}<span class="badge text-bg-secondary">Omröstning</span>{% endif %}
+    {% if t["title"] %}<b>{{ t["title"] }}</b> – {% endif %}
+    {%- if t["starter"] %}{{ t["starter"]|truncate(110) }}
+    {%- elif t["shared_body"] %}<span class="text-secondary">↪ delat inlägg:</span> {{ t["shared_body"]|truncate(100) }}
+    {%- elif t["shared_body"] is none and t["starter"] == "" %}<span class="text-secondary">↪ delat inlägg</span>
+    {%- else %}<span class="text-secondary">(trådstart saknas i dumpen)</span>{% endif %}
+  </div>
+  <small class="text-secondary">
+    {% if t["starter_id"] %}<a href="/arkiv/u/{{ t['starter_id'] }}" onclick="event.stopPropagation()">{{ t["starter_by"] or "Okänd" }}</a>{% else %}{{ t["starter_by"] or "Okänd" }}{% endif %} · {{ t["n"] }} inlägg · senast {{ t["last_at"]|svtid }}
+  </small>
+</div>
+{% endfor %}
