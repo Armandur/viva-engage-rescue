@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viva Engage / Yammer - API-rapport och lärdomar</title>
+<style>
+  :root { --fg:#1b1f24; --muted:#5b6675; --bg:#fff; --soft:#f5f7fa; --line:#dfe3e8;
+          --accent:#0d6efd; --code:#0b1020; --codefg:#e6edf3; --warn:#b54708; --ok:#1a7f37; }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--fg); background:var(--bg); font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { display:grid; grid-template-columns:260px 1fr; max-width:1200px; margin:0 auto; }
+  nav { position:sticky; top:0; align-self:start; height:100vh; overflow:auto; padding:1.5rem 1rem; border-right:1px solid var(--line); font-size:.9rem; }
+  nav h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:1.2rem 0 .4rem; }
+  nav a { display:block; color:var(--fg); text-decoration:none; padding:.2rem 0; }
+  nav a:hover { color:var(--accent); }
+  main { padding:2rem 2.5rem; min-width:0; }
+  h1 { font-size:1.9rem; margin:0 0 .3rem; }
+  h2 { font-size:1.4rem; margin:2.4rem 0 .6rem; padding-top:.4rem; border-top:1px solid var(--line); }
+  h3 { font-size:1.1rem; margin:1.4rem 0 .4rem; }
+  p, li { color:var(--fg); }
+  .lead { color:var(--muted); font-size:1.05rem; }
+  code { background:var(--soft); padding:.1em .35em; border-radius:4px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.88em; }
+  pre { background:var(--code); color:var(--codefg); padding:1rem 1.1rem; border-radius:8px; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.82rem; line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  table { border-collapse:collapse; width:100%; margin:.8rem 0; font-size:.9rem; }
+  th, td { border:1px solid var(--line); padding:.45rem .6rem; text-align:left; vertical-align:top; }
+  th { background:var(--soft); }
+  .tag { display:inline-block; font-size:.72rem; padding:.1rem .45rem; border-radius:999px; font-weight:600; }
+  .tag.get { background:#e7f1ff; color:#0a58ca; }
+  .tag.post { background:#e9f7ef; color:#1a7f37; }
+  .callout { border-left:4px solid var(--accent); background:var(--soft); padding:.7rem 1rem; border-radius:0 6px 6px 0; margin:1rem 0; }
+  .callout.warn { border-color:var(--warn); }
+  .callout.warn b { color:var(--warn); }
+  .callout.ok { border-color:var(--ok); }
+  .muted { color:var(--muted); }
+  .hashlist td:first-child { white-space:nowrap; font-family:ui-monospace,monospace; }
+  .hash { font-family:ui-monospace,monospace; font-size:.78rem; color:var(--muted); word-break:break-all; }
+  footer { margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); color:var(--muted); font-size:.85rem; }
+  @media (max-width:820px){ .wrap{grid-template-columns:1fr;} nav{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line);} main{padding:1.2rem;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <strong>Innehåll</strong>
+  <h2>Översikt</h2>
+  <a href="#intro">Bakgrund &amp; syfte</a>
+  <a href="#tldr">Sammanfattning</a>
+  <a href="#arch">Arkitektur</a>
+  <a href="#auth">Auth &amp; token</a>
+  <h2>API:er</h2>
+  <a href="#rest">Legacy Yammer REST</a>
+  <a href="#graphql">Modern Viva GraphQL (APQ)</a>
+  <a href="#hashes">Persisted-query-hashar</a>
+  <h2>Lärdomar</h2>
+  <a href="#pitfalls">Fallgropar &amp; insikter</a>
+  <h2>Struktur</h2>
+  <a href="#schema">Datamodell (SQLite)</a>
+  <a href="#patterns">Mönster &amp; upplägg</a>
+</nav>
+<main>
+
+<h1>Viva Engage / Yammer - API-rapport &amp; lärdomar</h1>
+<p class="lead">Hur ett helt Viva Engage-nätverk (Svenska kyrkan) skrapades och arkiverades
+till ett sökbart SQLite-arkiv inför nedstängning - vilka API:er som användes, vad som
+fungerade, och fallgroparna. Tänkt som referens för den som vill göra något liknande mot
+Viva Engage / Yammer.</p>
+
+<h2 id="intro">Bakgrund &amp; syfte</h2>
+<p>Viva Engage (f.d. Yammer) saknar en bra exportväg för historik. Microsoft Graph exporterar
+inte meddelandehistorik per community, så lösningen blev att kombinera <b>två API:er</b>: det
+gamla, stabila <b>Yammer REST-API:t</b> (full tråd-/meddelandestruktur) och det moderna
+<b>Viva GraphQL-API:t</b> (reaktioner, seen-count, medlemmar, storylines - sådant REST saknar).
+Allt drevs av en <b>fångad webbsessions-token</b>, inte en Entra-app.</p>
+<p class="muted">Resultat i arkivet: 128 communities, ~30 300 meddelanden, 34 500 användare,
+17 000 reaktionsrader (37 900 reaktorer), 296 storyline-trådar, 7 600 bilagor.</p>
+
+<h2 id="tldr">Sammanfattning (det viktigaste)</h2>
+<ul>
+  <li><b>Två API:er kompletterar varandra.</b> REST för innehållet, GraphQL för det REST inte ger.</li>
+  <li><b>Fångad sessionstoken</b> (kortlivad, ~en timme) fungerar mot <em>båda</em> API:erna - även
+      mot <code>engage.cloud.microsoft/graphql</code>, trots att tokenens audience är <code>yammer.com</code>.</li>
+  <li><b>Paginera på sid-fullhet, inte på "finns mer"-flaggor.</b> Yammers <code>older_available</code>
+      och GraphQL:s <code>hasNextPage</code> ljuger ibland.</li>
+  <li><b>GraphQL kör Apollo persisted queries</b> - du skickar bara <code>operationName</code> +
+      <code>sha256Hash</code> + variabler, aldrig query-texten. Hasharna dör vid app-deploy.</li>
+  <li><b>Förhandsdata är inte full data.</b> <code>featuredReactions</code> ger max 8 reagerande;
+      hela listan kräver ett eget paginerat anrop.</li>
+</ul>
+
+<h2 id="arch">Arkitektur</h2>
+<p>Allt byggdes som <b>idempotenta, resumebara pass</b> som skriver rå-JSON till disk, följt av
+ett <b>build-steg</b> som dedupar till SQLite. Inget pass håller state i minnet som inte också
+finns på disk - dör token mitt i tappas inget arbete.</p>
+<pre><code>dump        in_group        -&gt; data/raw/groups/&lt;id&gt;/page_*.json   (alla communities)
+threads     in_thread       -&gt; data/raw/threads/&lt;id&gt;/page_*.json  (backfilla hela trådar)
+build       rå-JSON         -&gt; data/archive.db (SQLite + FTS5, dedup på message-id)
+enrich      GraphQL         -&gt; reaktioner + seen-count per tråd
+reactors    GraphQL         -&gt; FULLA reaktörslistor (där urvalet räckte inte)
+storylines  GraphQL         -&gt; org-storyline-flödet -&gt; backfill via in_thread
+community   GraphQL         -&gt; info-text, fästa länkar, medlemmar (+admin)
+users       REST users.json -&gt; fulla profiler + avatarer
+download    REST            -&gt; bilagor + länkkorts-miniatyrer
+</code></pre>
+<p>En FastAPI-kontrollpanel orkestrerar passen (start/stopp, progress, token-inklistring) och en
+separat läs-app serverar arkivet. En <code>pipeline</code> kör alla pass i serie.</p>
+
+<h2 id="auth">Auth &amp; token</h2>
+<p>Token fångas från den inloggade webbsessionen (ett userscript hookar sidans <code>fetch</code>
+och matar panelen). Den är kortlivad, så pass <b>läser token färskt per anrop</b> och väntar in
+en ny vid <code>401</code> i stället för att krascha ("self-heal").</p>
+<pre><code>Authorization: Bearer &lt;token&gt;
+# Samma token mot båda baser:
+#   https://www.yammer.com/api/v1/...
+#   https://engage.cloud.microsoft/graphql
+</code></pre>
+<div class="callout"><b>Insikt:</b> tokenens <code>aud</code> är <code>www.yammer.com</code>, men den
+accepteras ändå av den moderna GraphQL-endpointen. Man behöver alltså inte en separat
+Entra-app - det räcker med det den inloggade användaren själv ser (delegerad åtkomst).</div>
+
+<h2 id="rest">Legacy Yammer REST-API</h2>
+<p>Bas: <code>https://www.yammer.com/api/v1</code>. Grovt ~10 req/10s, så throttla (~1,2s mellan
+anrop) och backa av vid 429/5xx. Ger full tråd-/meddelandestruktur.</p>
+<table>
+  <thead><tr><th>Endpoint</th><th>Vad</th><th>Paginering</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag get">GET</span> <code>messages/in_group/{id}.json</code></td><td>En communitys meddelanden</td><td><code>older_than</code> + <code>limit</code></td></tr>
+    <tr><td><span class="tag get">GET</span> <code>messages/in_thread/{id}.json</code></td><td>Hela en tråd (alla svar)</td><td><code>older_than</code> + <code>limit</code></td></tr>
+    <tr><td><span class="tag get">GET</span> <code>groups.json</code> (+ <code>mine=true</code>)</td><td>Communities (publika + de man är med i)</td><td><code>page</code> (50/sida)</td></tr>
+    <tr><td><span class="tag get">GET</span> <code>users.json</code></td><td>Alla användare - <b>full profil</b> per post</td><td><code>page</code> (50/sida)</td></tr>
+    <tr><td><span class="tag get">GET</span> <code>users/in_group/{id}.json</code></td><td>Medlemslista (utan admin-flagga)</td><td><code>page</code> (50/sida)</td></tr>
+    <tr><td><span class="tag get">GET</span> <code>{download_url}</code></td><td>Bilaga (proxar även SharePoint-filer)</td><td>-</td></tr>
+  </tbody>
+</table>
+<p>Svaret har <code>messages[]</code> + <code>references[]</code> (användare/grupper/taggar) + <code>meta</code>:</p>
+<pre><code>GET /api/v1/messages/in_thread/3791713089953792.json?limit=20&amp;older_than=...
+{
+  "messages": [
+    { "id": 3791713089953792, "thread_id": 3791713089953792, "sender_id": 1471,
+      "replied_to_id": null, "created_at": "2023/09/12 07:55:01 +0000",
+      "body": { "plain": "...", "rich": "...", "parsed": "..." },
+      "message_type": "update", "liked_by": { "count": 30, "names": [...] },
+      "attachments": [...], "notified_user_ids": [...] } ],
+  "references": [ { "type":"user","id":1471,"full_name":"...","mugshot_url":"..." } ],
+  "meta": { "older_available": false }
+}
+</code></pre>
+<div class="callout warn"><b>Fallgrop:</b> <code>meta.older_available</code> är opålitlig - den kan vara
+<code>false</code> trots att äldre meddelanden finns. Litar man på den <b>trunkeras trådar</b>
+(man tappar de äldsta meddelandena, inklusive trådstarten). Lösning: paginera på
+<b>sid-fullhet</b> - full sida (<code>len == limit</code>) =&gt; hämta äldre via
+<code>older_than = min(id)</code>; ofullständig sida =&gt; klart. Med no-progress-skydd.</div>
+<div class="callout"><b>Bra att veta:</b> <code>users.json</code> returnerar <em>samma</em> fält som
+<code>users/{id}.json</code> (ort, avdelning, bio, expertis, telefon, mugshot). Ett enda paginerat
+svep ger alltså hela nätverkets fulla profiler - ingen per-användare-loop behövs.</div>
+
+<h2 id="graphql">Modern Viva GraphQL (Apollo persisted queries)</h2>
+<p>Bas: <code>POST https://engage.cloud.microsoft/graphql?operationName=X</code>. Klienten kör
+<b>APQ</b>: query-texten skickas aldrig, bara ett <code>operationName</code> + en
+<code>sha256Hash</code> som identifierar den registrerade queryn, plus variabler.</p>
+<pre><code>POST https://engage.cloud.microsoft/graphql?operationName=MessageReactionsClients
+Authorization: Bearer &lt;token&gt;
+Content-Type: application/json
+{
+  "operationName": "MessageReactionsClients",
+  "variables": { "messageId": "&lt;base64&gt;", "reaction": null, "after": null },
+  "extensions": { "persistedQuery": { "version": 1,
+    "sha256Hash": "5263008b3d71ffe625c7037ed657bc41457ab909ebb00a7c4798fada4048731c" } }
+}
+</code></pre>
+<h3>Nod-id är base64-kodad JSON</h3>
+<p>Alla GraphQL-id är base64 av <code>{"_type":TYP,"id":"N"}</code>:</p>
+<pre><code>gid("Message", 3791713089953792)  # base64 av {"_type":"Message","id":"3791713089953792"}
+gid("Thread", n) / gid("Group", n) / gid("User", n)
+# avkoda baklänges för att få heltals-id:t tillbaka
+</code></pre>
+<h3>Så hittar man en hash</h3>
+<p>Hasharna finns inte dokumenterade - de fångas från den körande webbklienten: öppna funktionen i
+UI:t (t.ex. "vilka reagerade"), instrumentera sidans <code>fetch</code>, och läs
+<code>operationName</code> + <code>extensions.persistedQuery.sha256Hash</code> + <code>variables</code>
+ur anropet. (Nätverksfliken kan missa anropen beroende på verktyg - hooka <code>fetch</code> direkt.)</p>
+<div class="callout warn"><b>Fallgrop:</b> hasharna <b>byts vid app-deploy</b>. Får man
+<code>PersistedQueryNotFound</code> är den utslängd ur cachen - den webbklient som är öppen
+återregistrerar den löpande, så behandla felet som transient (vänta/retry med en Viva-flik öppen).
+Dör den helt måste en ny hash fångas. <b>Kör därför GraphQL-passen nära fångsten.</b></div>
+
+<h2 id="hashes">Persisted-query-hashar vi fångat</h2>
+<table class="hashlist">
+  <thead><tr><th>operationName</th><th>Ger</th><th>Paginering</th></tr></thead>
+  <tbody>
+    <tr><td>NestedThreadClients</td><td>Tråd + reaktioner + seenByCount + featured-reaktorer</td><td>topLevelReplies, bakåt</td></tr>
+    <tr><td>TopLevelRepliesClients</td><td>Fler toppsvar i en tråd</td><td><code>before</code>/startCursor</td></tr>
+    <tr><td>SecondLevelRepliesClients</td><td>Andra-nivå-svar (svar på svar)</td><td><code>before</code></td></tr>
+    <tr><td>MessageReactionsClients</td><td><b>Hela</b> reaktörslistan per meddelande</td><td><code>after</code>/endCursor</td></tr>
+    <tr><td>FeedUserWallNestedClients</td><td>En användares storyline-vägg</td><td><code>olderThan</code>/startCursor</td></tr>
+    <tr><td>FeedStorylineAllNestedClients</td><td><b>Org-övergripande</b> storyline-flöde (alla)</td><td><code>olderThan</code>/startCursor</td></tr>
+    <tr><td>GroupSidebarClients</td><td>Community: info-text, fästa länkar, medlemsantal</td><td>-</td></tr>
+    <tr><td>GroupMemberPanelClients</td><td>Hela medlemslistan + <b>isAdmin</b></td><td><code>after</code>/endCursor</td></tr>
+  </tbody>
+</table>
+<p class="muted">Exempelhash (MessageReactionsClients): <span class="hash">5263008b3d71ffe625c7037ed657bc41457ab909ebb00a7c4798fada4048731c</span> (APQ v1).</p>
+<h3>Exempel: full reaktörslista (paginerad)</h3>
+<pre><code>variables: { "messageId": gid("Message", id), "reaction": null, "after": &lt;endCursor|null&gt; }
+# svar:
+data.messageReactions.reactionsConnection.edges[] -&gt; { reaction, node:{ databaseId, displayName, ... } }
+data.messageReactions.reactionsConnection.pageInfo -&gt; { hasNextPage, endCursor }
+# loopa: after = endCursor tills hasNextPage == false. reaction=null = alla typer, taggat per edge.
+</code></pre>
+
+<h2 id="pitfalls">Fallgropar &amp; insikter</h2>
+<h3>1. "Finns mer"-flaggor ljuger - paginera på resultat</h3>
+<p>Både REST (<code>older_available</code>) och GraphQL (<code>hasNextPage</code>) kan säga "klart" för
+tidigt. Paginera på att en sida faktiskt är full / att nya poster kommer, inte på flaggan.</p>
+<h3>2. Cursor-riktningen är inte självklar</h3>
+<p>Storyline-flödena paginerar <b>bakåt</b> via <code>startCursor</code> + <code>hasPreviousPage</code>
+(inte <code>endCursor</code>/<code>hasNextPage</code>). Med fel fält fick vi nästan bara överlapp
+(samma 20 poster om och om). Rätt fält =&gt; rena, icke-överlappande sidor, hela flödet på ~18s.</p>
+<div class="callout warn"><b>Subtilt:</b> samma flöde gick <em>inte</em> att paginera headless med
+<code>olderThan: null</code> + <code>endCursor</code> - men i webbläsaren fungerade det, eftersom UI:t
+sätter en riktig cursor vid scroll. Lösningen var <code>startCursor</code>, inte att efterlikna UI:t.</div>
+<h3>3. Förhandsdata != full data</h3>
+<p><code>featuredReactions</code> ger bara ett <b>urval på max 8</b> reagerande per typ (som Vivas UI:s
+"och N andra"). Hela listan kräver <code>MessageReactionsClients</code> per meddelande. Vi hämtade
+bara full lista där urvalet inte räckte (~700 av 17 000 grupper).</p>
+<h3>4. Signerade media-URL:er går ut</h3>
+<p>Mugshot- och länkkorts-miniatyr-URL:er är <b>signerade och tidsbegränsade</b> (<code>?...&amp;sig=</code>).
+Sparar man dem och laddar ner senare =&gt; <code>403</code>. Lösning: ladda via den stabila
+<b>redirect-URL:en</b> (302:ar till en färsk signerad asset) och spara filen <b>lokalt</b> - en
+extern CDN-länk dör ändå när tjänsten stängs.</p>
+<h3>5. Föräldralösa processer &amp; zombies</h3>
+<p>Detacherade pass som överlever sin förälder fortsätter köra (och kan skriva över nyare data).
+Och en avslutad delprocess som inte reapats blir en <em>zombie</em> som <code>os.kill(pid,0)</code>
+rapporterar som "lever" - en panel kan fastna på "kör". Reapa barn (<code>waitpid</code>) och
+kontrollera <code>/proc/&lt;pid&gt;/stat</code>-tillståndet.</p>
+
+<h2 id="schema">Datamodell (SQLite + FTS5)</h2>
+<p>Rå-JSON är sanningskällan; <code>build</code> dedupar till SQLite. Fritextsök via en FTS5-vy över
+<code>body_plain</code>. Storyline-poster lagras som vanliga meddelanden med <code>group_id = NULL</code>.</p>
+<pre><code>communities(id, full_name, privacy, company_group, moderated, restricted_posting,
+            accessible, message_count, extended_description, member_count)
+users(id, full_name, email, job_title, location, department, summary, ...,
+      avatar_local, raw_json)
+messages(id, group_id, thread_id, replied_to_id, sender_id, created_at,
+         body_plain, body_rich, message_type, like_count, shared_message_id, ...)
+attachments(id, message_id, type, name, web_url, local_path, description, thumb_local)
+reactions(message_id, type, count)        reactors(message_id, type, user_id)
+thread_meta(thread_id, seen_by_count)     mentions / likes / polls / pinned / group_members / tags
+messages_fts USING fts5(body_plain, content='messages', content_rowid='id')
+</code></pre>
+
+<h2 id="patterns">Mönster &amp; rekommenderat upplägg</h2>
+<ul>
+  <li><b>Rå-dump + separat build.</b> Spara råsvaren oförändrade; bygg arkivet idempotent därifrån.
+      Då kan du bygga om utan att skrapa om, och en schemaändring är bara en ny build.</li>
+  <li><b>Resumebara, idempotenta pass.</b> Markörer på disk (<code>.done</code>/<code>.skipped</code>/
+      cursor-state). Naturlig resume: t.ex. "kapad reaktion" = sparade reaktorer &lt; count -&gt;
+      passet hoppar automatiskt det som redan är komplett.</li>
+  <li><b>Self-heal-token.</b> Läs token per anrop; vänta in en ny vid 401 i stället för att krascha.</li>
+  <li><b>Behandla persisted-query-fel som transient.</b> Retry med en öppen webbklient som
+      återregistrerar hashen; ge upp först efter en streak.</li>
+  <li><b>Separera styrning från visning.</b> En admin-app (skrapning/token) och en läs-app (arkivet)
+      som delar samma router men körs på olika portar - bara läs-appen exponeras externt.</li>
+  <li><b>Rendera säkert.</b> Sanera <code>body.rich</code> via en allowlist (behåll formatering,
+      skriv om @mention-spans till interna länkar) i stället för att lita på <code>parsed</code>.</li>
+  <li><b>Lazy-loading med fragment-endpoints</b> för långa listor; spegla position i URL-hashen för
+      delbara/återkomliga vyer.</li>
+</ul>
+
+<footer>
+  Genererad ur viva-engage-rescue 2026-06-14. Siffror speglar arkivet vid genereringen.
+  Self-contained: inga externa beroenden - öppna filen direkt i en webbläsare.
+</footer>
+</main>
+</div>
+</body>
+</html>
