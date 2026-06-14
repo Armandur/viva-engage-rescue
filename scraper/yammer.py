@@ -40,6 +40,7 @@ def _request(url: str, **params) -> requests.Response:
     väntar in en ny (inklistrad i panelen) vid 401 i stället för att krascha.
     Backar av vid 429/nätverksfel."""
     net_fails = 0
+    server_fails = 0
     while True:
         _throttle()
         tok = config.current_token()
@@ -70,6 +71,14 @@ def _request(url: str, **params) -> requests.Response:
             retry = int(resp.headers.get("Retry-After", 10))
             print(f"  429 rate limit - väntar {retry}s")
             time.sleep(retry)
+            continue
+        if resp.status_code in (500, 502, 503, 504):
+            server_fails += 1
+            if server_fails > 8:
+                raise RuntimeError(f"Gav upp efter {resp.status_code} på {url}")
+            wait = min(2 ** server_fails, 60)
+            print(f"  {resp.status_code} serverfel - nytt försök om {wait}s")
+            time.sleep(wait)
             continue
         return resp
 
@@ -124,34 +133,39 @@ def download(url: str, dest) -> str:
     return resp.headers.get("content-type", "")
 
 
-def iter_group_message_pages(group_id: int, older_than: int | None = None):
-    """Generator: yieldar råa feed-sidor för en grupp, äldre och äldre.
+_PAGE_LIMIT = 20
 
-    Varje feed innehåller toppmeddelanden och svar i `messages`, plus
-    `references` (användare, trådar, bilagor). Vi yieldar hela svaret rått.
-    `older_than` låter en avbruten körning återuppta mitt i en grupp.
+
+def _iter_message_pages(path: str, older_than: int | None = None):
+    """Yieldar råa feed-sidor (äldre och äldre) tills en ofullständig sida nås.
+
+    OBS: Yammers `meta.older_available` är opålitlig - den kan vara False trots
+    att äldre meddelanden finns (observerat på in_thread), vilket trunkerar
+    trådar (tappar de äldsta meddelandena, inkl. startaren). Därför paginerar vi
+    på sid-fullhet i stället: full sida (== limit) -> hämta äldre; ofullständig
+    sida -> klart. No-progress-skydd mot oändlig loop.
     """
     while True:
-        params = {"limit": 20}
+        params = {"limit": _PAGE_LIMIT}
         if older_than is not None:
             params["older_than"] = older_than
-        feed = get(f"messages/in_group/{group_id}.json", **params)
+        feed = get(path, **params)
         messages = feed.get("messages", []) if isinstance(feed, dict) else []
         yield feed
-        if not messages or not feed.get("meta", {}).get("older_available"):
+        if len(messages) < _PAGE_LIMIT:
             break
-        older_than = min(m["id"] for m in messages)
+        new_older = min(m["id"] for m in messages)
+        if older_than is not None and new_older >= older_than:
+            break  # ingen progress
+        older_than = new_older
+
+
+def iter_group_message_pages(group_id: int, older_than: int | None = None):
+    """Generator: yieldar råa feed-sidor för en grupp (in_group), äldre och äldre.
+    `older_than` låter en avbruten körning återuppta mitt i en grupp."""
+    yield from _iter_message_pages(f"messages/in_group/{group_id}.json", older_than)
 
 
 def iter_thread_pages(thread_id: int, older_than: int | None = None):
     """Generator: yieldar råa feed-sidor för en hel tråd (in_thread)."""
-    while True:
-        params = {"limit": 20}
-        if older_than is not None:
-            params["older_than"] = older_than
-        feed = get(f"messages/in_thread/{thread_id}.json", **params)
-        messages = feed.get("messages", []) if isinstance(feed, dict) else []
-        yield feed
-        if not messages or not feed.get("meta", {}).get("older_available"):
-            break
-        older_than = min(m["id"] for m in messages)
+    yield from _iter_message_pages(f"messages/in_thread/{thread_id}.json", older_than)

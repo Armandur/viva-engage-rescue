@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
@@ -6,6 +7,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 YAMMER_API_BASE = os.getenv("YAMMER_API_BASE", "https://www.yammer.com/api/v1").rstrip("/")
+
+
+def selected_groups() -> set[int] | None:
+    """Grupp-id ur '--groups id1,id2' (eller '--groups=...') i argv, annars None.
+
+    None betyder 'alla communities'. Används för selektiv körning av ett pass mot
+    bara vissa communities (omkörning/test)."""
+    args = sys.argv
+    raw = None
+    for i, a in enumerate(args):
+        if a == "--groups" and i + 1 < len(args):
+            raw = args[i + 1]
+            break
+        if a.startswith("--groups="):
+            raw = a.split("=", 1)[1]
+            break
+    if raw is None:
+        return None
+    return {int(x) for x in raw.split(",") if x.strip().lstrip("-").isdigit()}
 
 
 def current_token() -> str:

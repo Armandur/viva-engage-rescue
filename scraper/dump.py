@@ -20,9 +20,10 @@ import json
 import sys
 from pathlib import Path
 
-from . import yammer
+from . import config, yammer
 
 RAW = Path("data/raw")
+UPDATE_PROGRESS = Path("data/update_progress.json")  # nya inlägg under --update
 
 
 def _save(path: Path, obj) -> None:
@@ -71,6 +72,7 @@ def _dump_full(gdir: Path, gid: int, label: str) -> None:
     (gdir / ".highwater").write_text(str(max_seen), encoding="utf-8")
     cursor_file.unlink(missing_ok=True)
     print(f"  klar: {total} meddelanden\n")
+    return total
 
 
 def _dump_incremental(gdir: Path, gid: int, label: str) -> None:
@@ -95,6 +97,7 @@ def _dump_incremental(gdir: Path, gid: int, label: str) -> None:
     if max_seen > high:
         (gdir / ".highwater").write_text(str(max_seen), encoding="utf-8")
     print(f"  {new_total} nya inlägg\n" if new_total else "  inga nya inlägg\n")
+    return new_total
 
 
 def main() -> None:
@@ -105,13 +108,23 @@ def main() -> None:
     try:
         groups = yammer.iter_all_groups()
         _save(RAW / "groups.json", groups)
-        print(f"  {len(groups)} grupper.\n")
+        sel = config.selected_groups()
+        if sel is not None:
+            groups = [g for g in groups if g["id"] in sel]
+            print(f"  selektiv körning: {len(groups)} av valda communities.\n")
+        else:
+            print(f"  {len(groups)} grupper.\n")
 
+        total_groups = len(groups)
+        new_this_run = 0
+        if update:
+            UPDATE_PROGRESS.write_text(json.dumps(
+                {"new_posts": 0, "checked": 0, "total": total_groups}), encoding="utf-8")
         for i, g in enumerate(groups, 1):
             gid = g["id"]
             name = g.get("full_name") or g.get("name")
             gdir = RAW / "groups" / str(gid)
-            label = f"[{i}/{len(groups)}] {name} (id {gid})"
+            label = f"[{i}/{total_groups}] {name} (id {gid})"
             done = (gdir / ".done").exists()
 
             if done and not update:
@@ -121,13 +134,17 @@ def main() -> None:
             _save(gdir / "group.json", g)
             try:
                 if done and update:
-                    _dump_incremental(gdir, gid, label)
+                    new_this_run += _dump_incremental(gdir, gid, label) or 0
                 else:
                     # Oavslutad grupp, eller helt ny: full hämtning/resume.
-                    _dump_full(gdir, gid, label)
+                    new_this_run += _dump_full(gdir, gid, label) or 0
             except yammer.Forbidden:
                 (gdir / ".skipped").write_text("ingen läsbehörighet\n", encoding="utf-8")
                 print("  hoppad: ingen läsbehörighet (privat grupp)\n")
+            if update:
+                UPDATE_PROGRESS.write_text(json.dumps(
+                    {"new_posts": new_this_run, "checked": i, "total": total_groups}),
+                    encoding="utf-8")
     except yammer.TokenExpired:
         print(
             "\nTOKEN UTGÅNGEN. Fånga en ny token, uppdatera YAMMER_TOKEN i .env "

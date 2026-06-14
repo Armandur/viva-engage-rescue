@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import yammer
+from . import config, yammer
 
 RAW = Path("data/raw")
 THREADS = RAW / "threads"
@@ -27,12 +27,17 @@ def _save(path: Path, obj) -> None:
 
 
 def _known_thread_ids() -> list[int]:
-    """Alla thread_ids som in_group-dumpen sett."""
+    """Alla thread_ids som in_group-dumpen sett (ev. begränsat till valda grupper
+    via --groups)."""
+    sel = config.selected_groups()
+    gdirs = ([RAW / "groups" / str(g) for g in sel] if sel is not None
+             else (RAW / "groups").glob("*"))
     ids: set[int] = set()
-    for page in (RAW / "groups").glob("*/page_*.json"):
-        for m in json.loads(page.read_text(encoding="utf-8")).get("messages", []):
-            if m.get("thread_id"):
-                ids.add(m["thread_id"])
+    for gdir in gdirs:
+        for page in gdir.glob("page_*.json"):
+            for m in json.loads(page.read_text(encoding="utf-8")).get("messages", []):
+                if m.get("thread_id"):
+                    ids.add(m["thread_id"])
     return sorted(ids)
 
 
@@ -71,6 +76,9 @@ def main() -> None:
                 if done % 50 == 0:
                     print(f"  {done}/{len(ids)} trådar klara")
             except yammer.Forbidden:
+                # 404/403 sker innan _backfill hunnit skapa trådkatalogen - skapa
+                # den så markören kan skrivas (annars FileNotFoundError).
+                tdir.mkdir(parents=True, exist_ok=True)
                 (tdir / ".skipped").write_text("borttagen/ingen åtkomst\n", encoding="utf-8")
                 skipped += 1
     except yammer.TokenExpired:
