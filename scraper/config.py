@@ -28,6 +28,24 @@ def selected_groups() -> set[int] | None:
     return {int(x) for x in raw.split(",") if x.strip().lstrip("-").isdigit()}
 
 
+def excluded_groups() -> set[int]:
+    """Grupp-id som ALLTID ska hoppas (motsatsen till --groups): '--exclude id1,id2'
+    i argv eller EXCLUDE_GROUPS i miljön. Används för att hålla våra egna test-/arkiv-
+    grupper (skapade i nätverket av importern) utanför den vanliga exporten."""
+    args = sys.argv
+    raw = None
+    for i, a in enumerate(args):
+        if a == "--exclude" and i + 1 < len(args):
+            raw = args[i + 1]
+            break
+        if a.startswith("--exclude="):
+            raw = a.split("=", 1)[1]
+            break
+    if raw is None:
+        raw = os.getenv("EXCLUDE_GROUPS", "")
+    return {int(x) for x in raw.split(",") if x.strip().lstrip("-").isdigit()}
+
+
 def current_token() -> str:
     """Läser token färskt ur .env varje gång, så en ny token (inklistrad i
     panelen) plockas upp av en pågående körning utan omstart."""

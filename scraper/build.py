@@ -11,6 +11,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from . import config
+
 RAW = Path("data/raw")
 ATT = Path("data/attachments")
 RXN = Path("data/raw/reactions")
@@ -126,7 +128,14 @@ def main() -> None:
     communities, users, messages, attachments = {}, {}, {}, {}
     mentions, likes, polls, tags = {}, {}, {}, {}
 
+    # Exkluderade grupper (våra egna test-/arkiv-grupper i nätverket) ska aldrig in.
+    exc = config.excluded_groups()
+    if exc:
+        print(f"  exkluderar {len(exc)} grupper ur bygget: {sorted(exc)}")
+
     for g in json.loads((RAW / "groups.json").read_text(encoding="utf-8")):
+        if g["id"] in exc:
+            continue
         # accessible=0 om dumpen fick åtkomst nekad (privat grupp utan medlemskap).
         accessible = 0 if (RAW / "groups" / str(g["id"]) / ".skipped").exists() else 1
         communities[g["id"]] = (
@@ -151,6 +160,8 @@ def main() -> None:
             elif r.get("type") == "tag" and r["id"] not in tags:
                 tags[r["id"]] = (r["id"], r.get("name"))
         for m in data.get("messages", []):
+            if m.get("group_id") in exc:
+                continue
             body = m.get("body") or {}
             lb = m.get("liked_by") or {}
             urls = body.get("urls") or []

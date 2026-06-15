@@ -97,13 +97,13 @@ storylines, community-info, profiler, avatarer, bilagor). Kvar:
       (config.selected_groups()) i dump/threads/download/enrich + multiselect i
       panelen ("Begränsa till vissa communities") som skickar ?groups= till
       /start. Tomt = alla. (2026-06-10)
-- [ ] **Exkludera grupper ur exporten (motsats till --groups).** Den vanliga
-      arkivexporten ska INTE dra in PoC-/arkiv-grupperna vi själva skapat i nätverket
-      - just nu `test-ve-export-import` (id 2104760211603456), och framöver ev.
-      `[Arkiv] ...`-grupper från importen. Annars förorenar våra egna re-importerade
-      inlägg arkivet (cirkulärt). Bygg en exkluderingslista: `--exclude id1,id2`
-      (config) som dump/threads/community_info/users hoppar, + motsvarande
-      multiselect i panelen. Default-exkludera test-gruppens id.
+- [x] **Exkludera grupper ur exporten (2026-06-15).** `config.excluded_groups()`
+      läser `--exclude id1,id2` (argv) eller `EXCLUDE_GROUPS` (.env). dump filtrerar
+      bort dem INNAN groups.json sparas; build hoppar dem i community- och
+      meddelande-loopen (belt-and-suspenders). Våra fyra test-grupper ligger i
+      `EXCLUDE_GROUPS` i .env. Bekräftat: en `--update`-körning drog in test-grupperna,
+      och efter exclude + ombyggnad är de borta (riktiga org-test-communities kvar).
+      KVAR (valfritt): multiselect i panelen för exclude.
 - [x] **Arkiv-UX: datum, sökfilter, översikt.** Svensk lokaltid (svtid-filter);
       sök filtrerbart på community/avsändare/datumintervall (+ filter-only
       bläddring, säker snippet); översiktssida (/arkiv/oversikt) med totaler,

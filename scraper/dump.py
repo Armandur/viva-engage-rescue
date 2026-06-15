@@ -107,7 +107,12 @@ def main() -> None:
 
     try:
         groups = yammer.iter_all_groups()
-        _save(RAW / "groups.json", groups)
+        exc = config.excluded_groups()
+        if exc:
+            before = len(groups)
+            groups = [g for g in groups if g["id"] not in exc]
+            print(f"  exkluderar {before - len(groups)} grupper (EXCLUDE_GROUPS/--exclude).")
+        _save(RAW / "groups.json", groups)  # sparas EFTER exkludering -> build ser dem inte
         sel = config.selected_groups()
         if sel is not None:
             groups = [g for g in groups if g["id"] in sel]
