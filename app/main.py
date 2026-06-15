@@ -43,6 +43,7 @@ LOGS = {
     "users": ROOT / "data" / "users.log",
     "reactors": ROOT / "data" / "reactors.log",
     "pipeline": ROOT / "data" / "pipeline.log",
+    "import": ROOT / "data" / "import.log",
 }
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -637,6 +638,39 @@ def _pipeline_status() -> dict | None:
         return None
 
 
+_IMPORT_PROGRESS = ROOT / "data" / "import_progress.json"
+
+
+def _import_status() -> dict | None:
+    if not _IMPORT_PROGRESS.exists():
+        return None
+    try:
+        return json.loads(_IMPORT_PROGRESS.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
+def _archived_communities():
+    """Hämtar communities och deras storlek ur arkivet för import-väljaren."""
+    if not ARCHIVE_DB.exists():
+        return []
+    try:
+        con = sqlite3.connect(f"file:{ARCHIVE_DB}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        # Vi joinar mot messages för att få meddelandeantal
+        rows = con.execute("""
+            SELECT c.id, c.full_name, COUNT(m.id) as count
+            FROM communities c
+            LEFT JOIN messages m ON m.group_id = c.id
+            GROUP BY c.id
+            ORDER BY count DESC
+        """).fetchall()
+        con.close()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []
+
+
 def _log_tail(kind: str, n: int = 25) -> str:
     log = LOGS.get(kind)
     if not log or not log.exists():
@@ -648,7 +682,9 @@ def _log_tail(kind: str, n: int = 25) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(request, "index.html", {
+        "archived_communities": _archived_communities()
+    })
 
 
 @app.get("/viva-token-sync.user.js")
@@ -685,6 +721,7 @@ def status():
         "users": _users_status(),
         "reactors": _reactors_status(),
         "pipeline": _pipeline_status(),
+        "import": _import_status(),
     }
 
 
@@ -715,6 +752,32 @@ def api_token(payload: dict = Body(...)):
 @app.post("/start/{kind}")
 def start(kind: str, groups: str = ""):
     _start(kind, groups)
+    return RedirectResponse("/", status_code=302)
+
+
+@app.post("/start_import/{cmd}")
+def start_import(cmd: str, source: int = Form(...), target: str = Form(""), flat: bool = Form(False)):
+    if _running():
+        raise HTTPException(409, "en körning pågår redan")
+    if not _read_env().get("YAMMER_TOKEN"):
+        raise HTTPException(400, "ingen token satt")
+
+    # cmd: dry-run, smoke, run, clear
+    full_cmd = [sys.executable, "-m", "scraper.importer", cmd, str(source)]
+    if target and target.strip():
+        full_cmd.append(target.strip())
+    if flat:
+        full_cmd.append("--flat")
+
+    log = LOGS["import"].open("w", encoding="utf-8")
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    proc = subprocess.Popen(
+        full_cmd, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT, env=env,
+    )
+    PIDFILE.write_text(
+        json.dumps({"pid": proc.pid, "kind": "import", "started": time.time()}),
+        encoding="utf-8",
+    )
     return RedirectResponse("/", status_code=302)
 
 

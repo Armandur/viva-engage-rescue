@@ -18,11 +18,8 @@
       `.dockerignore`, `DOCKER.md`. Imagen byggd + smoke-testad lokalt: publika
       appen svarar 200, admin (`/api/status`) ger 404 i publika imagen. Publika
       arkivet monterar `data/` read-only; admin-profilen rw + `.env`.
-- [ ] **Driftsätt på Unraid + importera data.** Pusha repot (CI bygger/publicerar
-      imagen), kör `docker-compose.yml` på TERVO2 med volymen mot en host-path
-      (t.ex. /mnt/user/appdata/viva-arkiv/data), `rsync` över `data/` (~28 GB,
-      efter sista omkörningen så mest kompletta datan importeras), och sätt basic
-      auth i Nginx Proxy Manager framför port 8051.
+- [x] **Driftsatt på Unraid (2026-06-15).** Imagen kör på TERVO2 med volym mot
+      host-path och data importerad; basic auth i Nginx Proxy Manager framför 8051.
 
 ## Re-import (PoC)
 - [x] **PoC: importera en community till ett privat test-community. KÖRT 2026-06-15.**

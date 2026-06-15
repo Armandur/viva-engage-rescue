@@ -47,8 +47,18 @@ from .yammer import Forbidden, TokenExpired
 
 DB = Path("data/archive.db")
 IMPORT_DIR = Path("data/import")
+PROGRESS_FILE = Path("data/import_progress.json")
 # Läs-arkivets bas-URL: dit pekas interna länkar vi inte (re)postat. Default = publika appen.
 ARCHIVE_BASE = "http://ubuntu-ai:8051"
+
+
+def _report_progress(phase: str, action: str, source: int, target: int | None,
+                     posted: int, total: int, done: bool = False) -> None:
+    PROGRESS_FILE.write_text(json.dumps({
+        "phase": phase, "action": action, "source": source, "target": target,
+        "posted": posted, "total": total, "done": done, "time": datetime.now().isoformat()
+    }), encoding="utf-8")
+
 
 _EMOJI = {
     "like": "👍", "love": "❤️", "laugh": "😄", "celebrate": "🎉",
@@ -196,7 +206,7 @@ def _footer(con: sqlite3.Connection, m: sqlite3.Row, seen: int | None,
         parts.append("✓ markerat som bästa svar")
     elif is_verified:
         parts.append("✓ verifierat svar")
-    return "— " + " · ".join(parts) if parts else ""
+    return "- " + " · ".join(parts) if parts else ""
 
 
 def _compose(con: sqlite3.Connection, m: sqlite3.Row, *, is_starter: bool,
@@ -291,18 +301,38 @@ def _ensure_group(con: sqlite3.Connection, gid: int, idmap: dict,
         return target
     if idmap.get("new_group"):
         return idmap["new_group"]
-    name = f"[Arkiv] {_group_name(con, gid)}"
-    print(f"Skapar privat community: {name!r}")
-    resp = yammer.post("groups.json", name=name, private="true", show_in_directory="false")
-    new_gid = resp.get("id") or (resp.get("group") or {}).get("id")
-    if not new_gid:
-        raise RuntimeError(f"Kunde inte läsa nytt grupp-id ur svaret: {resp}")
+    # Verktyget skapar ett tydligt TEST-flaggat, PRIVAT community via GraphQL-mutationen
+    # (legacy groups.json är blockerat för externa anrop). Hakparenteser i namnet ger
+    # INVALID_DISPLAY_NAME -> strippas.
+    raw = _group_name(con, gid).replace("[", "").replace("]", "")
+    name = f"TEST Arkiv - {raw}"
+    print(f"Skapar privat test-community via GraphQL: {name!r}")
+    new_gid = _create_group_gql(name, private=True)
     idmap["new_group"] = new_gid
     idmap["new_group_name"] = name
     idmap["created_by_tool"] = True
     _save_map(gid, idmap)
     print(f"  -> nytt grupp-id {new_gid}")
     return new_gid
+
+
+def _create_group_gql(display_name: str, private: bool = True) -> int:
+    """Skapar ett community via GraphQL-mutationen CreateGroupClients (samma
+    sessionstoken som övriga anrop). Returnerar det numeriska grupp-id:t."""
+    variables = {
+        "displayName": display_name, "description": "",
+        "isExternal": False, "isPrivate": private, "isUnlisted": False,
+        "threadStarterDefaultContentType": "NORMAL", "addMemberUserIds": [],
+        "isMoveThreadToThisGroupRestricted": False,
+    }
+    data = gq.query("CreateGroupClients", variables)
+    grp = ((data or {}).get("createGroup") or {}).get("group") or {}
+    tid = grp.get("telemetryId")
+    if tid:
+        return int(tid)
+    if grp.get("id"):
+        return int(gq.gid_decode(grp["id"]))
+    raise RuntimeError(f"Kunde inte läsa nytt grupp-id ur CreateGroup-svaret: {str(data)[:300]}")
 
 
 def _content_state(text: str) -> str:
@@ -382,6 +412,7 @@ def cmd_dry_run(gid: int) -> None:
     con = _db()
     known = _known_threads(con)
     out = IMPORT_DIR / f"dryrun_{gid}.txt"
+    _report_progress("dry-run", "startar", gid, None, 0, 1)
     IMPORT_DIR.mkdir(parents=True, exist_ok=True)
     threads = _threads_chrono(con, gid)
     lines: list[str] = [
@@ -411,6 +442,7 @@ def cmd_dry_run(gid: int) -> None:
                                   reply_to=(None if i == 0 else _reply_to(by_id, m, tid))))
     out.write_text("\n".join(lines), encoding="utf-8")
     con.close()
+    _report_progress("dry-run", "klar", gid, None, 1, 1, done=True)
     print(f"Dry-run klar: {len(threads)} trådar, {nmsgs} inlägg.")
     print(f"Granska: {out}")
 
@@ -421,6 +453,7 @@ def cmd_smoke(gid: int, target: int | None = None) -> None:
     idmap = _load_map(gid)
     print("SMOKE-TEST: 1 trådstart + 1 svar (verifierar skriv-primitiven).")
     new_gid = _ensure_group(con, gid, idmap, target)
+    _report_progress("smoke", "startar", gid, new_gid, 0, 2)
 
     starter_body = ("Smoke-test av arkiv-importen.\n\n"
                     "Detta är ett automatiskt testinlägg i ett privat enmans-community. "
@@ -429,11 +462,13 @@ def cmd_smoke(gid: int, target: int | None = None) -> None:
     sid, surl = _post(starter_body, group_id=new_gid)
     print(f"  trådstart skapad: id {sid}  {surl}")
     idmap["messages"][str(-1)] = {"new_id": sid, "new_url": surl, "smoke": True}
+    _report_progress("smoke", "trådstart klar", gid, new_gid, 1, 2)
 
     rid, rurl = _post("Smoke-test: svar i samma tråd (replied_to_id satt).", replied_to_id=sid)
     print(f"  svar skapat: id {rid}  {rurl}")
     idmap["messages"][str(-2)] = {"new_id": rid, "new_url": rurl, "smoke": True}
     _save_map(gid, idmap)
+    _report_progress("smoke", "klar", gid, new_gid, 2, 2, done=True)
     con.close()
 
     print("\nSMOKE OK. Verifiera manuellt i Viva:")
@@ -450,12 +485,14 @@ def cmd_smoke_nested(gid: int, target: int | None = None) -> None:
     idmap = _load_map(gid)
     new_gid = _ensure_group(con, gid, idmap, target)
     con.close()
+    _report_progress("smoke-nested", "startar", gid, new_gid, 0, 4)
     IMPORT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("NÄSTLINGS-SMOKE: trådstart (REST) + svar nivå 1/2/3 (GraphQL).")
     sid, surl = _post("Nästlingstest - trådstart (REST).", group_id=new_gid)
     print(f"  trådstart: id {sid}")
     idmap["messages"]["-10"] = {"new_id": sid, "new_url": surl, "smoke": True}
+    _report_progress("smoke-nested", "trådstart klar", gid, new_gid, 1, 4)
 
     # Nivå 1: svar direkt på trådstarten -> isSecondLevelReply=false. Dumpa råsvaret.
     v = {"serializedContentState": _content_state("Svar nivå 1 (direkt på tråden)."),
@@ -470,16 +507,19 @@ def cmd_smoke_nested(gid: int, target: int | None = None) -> None:
     l1 = _find_new_message_id(data, v["replyToMessageMutationId"])
     print(f"  svar nivå 1: id {l1}  (råsvar -> data/import/smoke_nested_response.json)")
     idmap["messages"]["-11"] = {"new_id": l1, "smoke": True}
+    _report_progress("smoke-nested", "nivå 1 klar", gid, new_gid, 2, 4)
 
     # Nivå 2: svar på nivå-1 -> isSecondLevelReply=true.
     l2 = _post_reply_gql("@Nivå1-författare Svar nivå 2 (på ett svar).", l1, True)
     print(f"  svar nivå 2: id {l2}")
     idmap["messages"]["-12"] = {"new_id": l2, "smoke": True}
+    _report_progress("smoke-nested", "nivå 2 klar", gid, new_gid, 3, 4)
 
     # Nivå 3: svar på nivå-2 -> isSecondLevelReply=true (UI plattar visuellt, back-end behåller).
     l3 = _post_reply_gql("@Nivå2-författare Svar nivå 3 (på svar-på-svar).", l2, True)
     print(f"  svar nivå 3: id {l3}")
     idmap["messages"]["-13"] = {"new_id": l3, "smoke": True}
+    _report_progress("smoke-nested", "klar", gid, new_gid, 4, 4, done=True)
 
     _save_map(gid, idmap)
     print(f"\nNÄSTLINGS-SMOKE OK. Verifiera i grupp {new_gid}:")
@@ -501,6 +541,7 @@ def cmd_run(gid: int, target: int | None = None) -> None:
     nested = "--flat" not in sys.argv
     print(f"Importerar {len(threads)} trådar ({total} inlägg) -> grupp {new_gid}. "
           f"{'Nästlat läge (GraphQL-svar).' if nested else 'Platt läge (REST replied_to_id).'}")
+    _report_progress("run", "startar", gid, new_gid, 0, total)
     posted = skipped = 0
     try:
         for ti, tid in enumerate(threads, 1):
@@ -542,22 +583,27 @@ def cmd_run(gid: int, target: int | None = None) -> None:
                         nid, nurl = _post(body, replied_to_id=parent_new)
                 msgmap[key] = {"new_id": nid, "new_url": nurl}
                 posted += 1
-                if posted % 10 == 0:
+                if posted % 5 == 0:
                     _save_map(gid, idmap)
+                    _report_progress("run", f"tråd {ti}/{len(threads)}", gid, new_gid,
+                                     posted + skipped, total)
                     print(f"  [{ti}/{len(threads)} trådar] {posted} postade, {skipped} hoppade "
                           f"(skriv-intervall {yammer._write_interval:.2f}s)")
     except (TokenExpired, KeyboardInterrupt) as e:
         _save_map(gid, idmap)
+        _report_progress("run", "avbrutet", gid, new_gid, posted + skipped, total)
         print(f"Avbrutet ({type(e).__name__}): {posted} postade. Kör 'run {gid}' igen för resume.")
         con.close()
         return
     except Forbidden as e:
         _save_map(gid, idmap)
+        _report_progress("run", "förbjudet", gid, new_gid, posted + skipped, total)
         print(f"Skriv-fel (Forbidden): {e}")
         print("Token saknar troligen skrivbehörighet, eller gruppen tillåter inte postning.")
         con.close()
         return
     _save_map(gid, idmap)
+    _report_progress("run", "klar", gid, new_gid, total, total, done=True)
     con.close()
     print(f"KLART. {posted} postade, {skipped} hoppade (redan importerade).")
     print(f"Nytt community-id {new_gid}. id-map: {_map_path(gid)}")
@@ -582,7 +628,9 @@ def cmd_clear(gid: int) -> None:
     ids = [(k, e["new_id"]) for k, e in msgs.items() if e.get("new_id")]
     # Radera i omvänd id-ordning (svar/senare före trådstart) för att minska kaskad-404.
     ids.sort(key=lambda kv: kv[1], reverse=True)
-    print(f"Raderar {len(ids)} inlägg ur grupp {idmap.get('new_group')} (gruppen behålls).")
+    total = len(ids)
+    print(f"Raderar {total} inlägg ur grupp {idmap.get('new_group')} (gruppen behålls).")
+    _report_progress("clear", "startar", gid, idmap.get("new_group"), 0, total)
     deleted = gone = 0
     for k, mid in ids:
         try:
@@ -592,13 +640,16 @@ def cmd_clear(gid: int) -> None:
             gone += 1  # redan borta (t.ex. kaskad när en trådstart redan raderats)
         except (TokenExpired, KeyboardInterrupt) as e:
             _save_map(gid, idmap)
+            _report_progress("clear", "avbrutet", gid, idmap.get("new_group"), deleted + gone, total)
             print(f"Avbrutet ({type(e).__name__}): {deleted} raderade. Kör 'clear {gid}' igen.")
             return
         msgs.pop(k, None)
         if (deleted + gone) % 20 == 0:
             _save_map(gid, idmap)
+            _report_progress("clear", "raderar", gid, idmap.get("new_group"), deleted + gone, total)
             print(f"  {deleted} raderade, {gone} redan borta")
     _save_map(gid, idmap)
+    _report_progress("clear", "klar", gid, idmap.get("new_group"), total, total, done=True)
     print(f"KLART. {deleted} raderade, {gone} redan borta. Gruppen {idmap.get('new_group')} kvar, "
           f"id-mappen tömd på inlägg.")
 

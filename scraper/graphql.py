@@ -40,6 +40,11 @@ HASHES = {
     # hela förälderkedjan (godtyckligt djup); UI visar 2 indrag + @-mention. Fångad
     # 2026-06-15 (scraper/importer.py nästlade import). Dör vid app-deploy som övriga.
     "PublishReplyMessageClients": "85a613b9ffbcaaf5975650d5c79468e13fd7ec005de9f4bd4d271618546e0364",
+    # MUTATION: skapar ett community. variables: displayName (INGA hakparenteser ->
+    # INVALID_DISPLAY_NAME), isPrivate, isUnlisted, isExternal, addMemberUserIds m.fl.
+    # Svar: data.createGroup.group.{id (base64 Group-nod), telemetryId (numeriskt)}.
+    # Synkront, inga följdanrop. Ersätter blockerade legacy groups.json. Fångad 2026-06-15.
+    "CreateGroupClients": "b3d0a88555c30ee2d6dfd239d7d7954ccf6884de3712b1820360f70352f09231",
 }
 
 _MIN_INTERVAL = 1.2

@@ -228,9 +228,15 @@ Innan bygge, verifiera (med ett **test-konto / test-community**):
 
 Legacy Yammer REST (`https://www.yammer.com/api/v1`), samma token-typ som läs-skrapet:
 
-- **Skapa privat community:** `POST groups.json` med `name`, `private=true`,
-  `show_in_directory=false` -> `201` + nytt grupp-id. (Publika *unlisted* grupper är
-  ogiltiga; privata unlisted funkar.)
+- **Skapa privat community:** legacy `POST groups.json` är **blockerat** (403, "use
+  Msgraph Engage community creation API instead"). Två fungerande vägar i stället:
+  (a) **GraphQL-mutationen `CreateGroupClients`** (hash i graphql.HASHES) - samma
+  sessionstoken som övrigt, vad importern använder. variables: `displayName` (INGA
+  hakparenteser -> `INVALID_DISPLAY_NAME`), `isPrivate`, `isUnlisted`, `isExternal`,
+  `addMemberUserIds` m.fl.; svar: `data.createGroup.group.{id (base64), telemetryId
+  (numeriskt)}`; synkront, inga följdanrop. (b) Graphs Engage community-API (`POST
+  /employeeExperience/communities`, kräver Graph-token + Entra-app-behörighet - oftast
+  inte tillgängligt för en vanlig medlem). Verktyget tar väg (a).
 - **Skapa inlägg:** `POST messages.json` (form-encoded). Nyckelparametrar: `body`,
   `group_id` (trådstart i en grupp), `replied_to_id` (svar i befintlig tråd -
   group/network infereras därifrån), `is_rich_text:true` + `message_type:announcement`

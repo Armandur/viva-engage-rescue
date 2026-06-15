@@ -74,6 +74,47 @@
 
   <div class="card mb-3">
     <div class="card-body">
+      <h2 class="h6">Import (re-import till Viva)</h2>
+      <form id="import-form" method="post" action="/start_import/run">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-5">
+            <label class="small text-secondary">Källcommunity (från arkivet)</label>
+            <select name="source" class="form-select form-select-sm" required>
+              <option value="">Välj community…</option>
+              {% for c in archived_communities %}
+              <option value="{{ c.id }}">{{ c.full_name }} ({{ c.count }} meddelanden)</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="small text-secondary">Målgruppens id (i Viva)</label>
+            <input type="text" name="target" class="form-control form-control-sm" placeholder="t.ex. 123456789">
+          </div>
+          <div class="col-md-3">
+            <div class="form-check form-switch mb-1">
+              <input class="form-check-input" type="checkbox" name="flat" id="import-flat">
+              <label class="form-check-label small" for="import-flat">Platt läge (--flat)</label>
+            </div>
+          </div>
+        </div>
+        <div class="mt-2 small text-secondary">
+          Ange ett målgrupp-id (hitta via 'mine'-kommandot eller gruppens URL), eller lämna
+          tomt så skapar verktyget själv ett privat test-community ("TEST Arkiv - ...") att
+          posta i. Auto-skapande sker via GraphQL (legacy groups.json är blockerat).
+        </div>
+        <div id="import-controls" class="mt-3">
+          <button type="button" class="btn btn-outline-secondary btn-sm me-1" onclick="startImport('dry-run')">Dry-run (preview)</button>
+          <button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="startImport('smoke')">Smoke-test</button>
+          <button type="button" class="btn btn-primary btn-sm me-1" onclick="startImport('run')">Importera</button>
+          <button type="button" class="btn btn-outline-danger btn-sm" onclick="startImport('clear')">Rensa inlägg</button>
+        </div>
+      </form>
+      <div id="import-line" class="mt-3"></div>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
       <h2 class="h6">Logg</h2>
       <pre id="log" class="mb-0">-</pre>
     </div>
@@ -104,6 +145,25 @@ function startPipeline() {
       "Tar flera timmar. Håll en Viva-flik öppen så token matas automatiskt.")) {
     start("pipeline");
   }
+}
+function startImport(cmd) {
+  const form = document.getElementById("import-form");
+  if (!form.reportValidity()) return;
+  const sourceName = form.source.options[form.source.selectedIndex].text;
+  // Tomt målgrupp-fält => verktyget skapar själv ett privat test-community.
+  const noTarget = !form.target.value.trim();
+  if ((cmd === "smoke" || cmd === "run") && noTarget) {
+    if (!confirm(`Inget målgrupp-id angivet.\n\nVerktyget skapar då ett NYTT privat test-community ("TEST Arkiv - ...") i Viva. Fortsätta?`)) return;
+  }
+  if (cmd === "run") {
+    if (!confirm(`Vill du verkligen IMPORTERA ${sourceName} till Viva?\n\nDetta kommer att posta meddelanden live under ditt namn.`)) return;
+  } else if (cmd === "smoke") {
+    if (!confirm(`Kör SMOKE-TEST för ${sourceName}?`)) return;
+  } else if (cmd === "clear") {
+    if (!confirm(`Vill du verkligen RADERA alla importerade inlägg för ${sourceName}?\n\nDetta går inte att ångra.`)) return;
+  }
+  form.action = `/start_import/${cmd}`;
+  form.submit();
 }
 let _pickerOpen = false;
 function renderGroupPicker(rows, running) {
@@ -385,6 +445,28 @@ async function refresh() {
       `<div class="progress mt-1"><div class="progress-bar bg-info" style="width:${pct}%">${pct}%</div></div>`;
   } else {
     rxLine.innerHTML = "";
+  }
+
+  const im = d.import;
+  const imline = document.getElementById("import-line");
+  const imForm = document.getElementById("import-form");
+  if (im) {
+    const pct = im.total ? Math.floor((100 * im.posted) / im.total) : 0;
+    const cls = im.done ? "bg-success" : "bg-primary";
+    const action = im.phase === "run" ? "Import" : im.phase === "clear" ? "Rensning" : "Smoke-test";
+    imline.innerHTML =
+      `<div class="d-flex justify-content-between small">` +
+      `<span><b>${action}</b>: ${im.action} (${im.posted} / ${im.total})</span>` +
+      `<span>${im.done ? "klar" : ""}</span></div>` +
+      `<div class="progress mt-1"><div class="progress-bar ${cls}" style="width:${pct}%">${pct}%</div></div>`;
+  } else {
+    imline.innerHTML = "";
+  }
+  if (imForm) {
+    const btns = imForm.querySelectorAll("button");
+    const inputs = imForm.querySelectorAll("input, select");
+    btns.forEach(b => b.disabled = !!running);
+    inputs.forEach(i => i.disabled = !!running);
   }
 
   const up = d.update;
