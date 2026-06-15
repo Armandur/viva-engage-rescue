@@ -35,6 +35,11 @@ HASHES = {
     # Org-övergripande storyline-flöde ("alla"). Noderna är trådar. Paginerar via
     # olderThan = endCursor. Fångad 2026-06-14. Ersätter per-konto-probandet.
     "FeedStorylineAllNestedClients": "47acebf566110a3cc5b5096fa6052a3eca51bf4c77883abb8a263f2764f7d5a1",
+    # MUTATION: skapar ett svar. replyToMessageMutationId = förälderns gid("Message"),
+    # isSecondLevelReply = (förälder är ett svar, inte trådstarten). Back-end bevarar
+    # hela förälderkedjan (godtyckligt djup); UI visar 2 indrag + @-mention. Fångad
+    # 2026-06-15 (scraper/importer.py nästlade import). Dör vid app-deploy som övriga.
+    "PublishReplyMessageClients": "85a613b9ffbcaaf5975650d5c79468e13fd7ec005de9f4bd4d271618546e0364",
 }
 
 _MIN_INTERVAL = 1.2

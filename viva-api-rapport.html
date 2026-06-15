@@ -53,6 +53,9 @@
   <a href="#rest">Legacy Yammer REST</a>
   <a href="#graphql">Modern Viva GraphQL (APQ)</a>
   <a href="#hashes">Persisted-query-hashar</a>
+  <h2>Skrivning / re-import</h2>
+  <a href="#write">Skriv-API (re-import)</a>
+  <a href="#nesting">Nästlade svar</a>
   <h2>Lärdomar</h2>
   <a href="#pitfalls">Fallgropar &amp; insikter</a>
   <h2>Struktur</h2>
@@ -197,6 +200,7 @@ Dör den helt måste en ny hash fångas. <b>Kör därför GraphQL-passen nära f
     <tr><td>FeedStorylineAllNestedClients</td><td><b>Org-övergripande</b> storyline-flöde (alla)</td><td><code>olderThan</code>/startCursor</td></tr>
     <tr><td>GroupSidebarClients</td><td>Community: info-text, fästa länkar, medlemsantal</td><td>-</td></tr>
     <tr><td>GroupMemberPanelClients</td><td>Hela medlemslistan + <b>isAdmin</b></td><td><code>after</code>/endCursor</td></tr>
+    <tr><td>PublishReplyMessageClients <span class="tag post">MUTATION</span></td><td>Skapar ett svar (med nästling) - se <a href="#nesting">Nästlade svar</a></td><td>-</td></tr>
   </tbody>
 </table>
 <p class="muted">Exempelhash (MessageReactionsClients): <span class="hash">5263008b3d71ffe625c7037ed657bc41457ab909ebb00a7c4798fada4048731c</span> (APQ v1).</p>
@@ -207,6 +211,71 @@ data.messageReactions.reactionsConnection.edges[] -&gt; { reaction, node:{ datab
 data.messageReactions.reactionsConnection.pageInfo -&gt; { hasNextPage, endCursor }
 # loopa: after = endCursor tills hasNextPage == false. reaction=null = alla typer, taggat per edge.
 </code></pre>
+
+<h2 id="write">Skriv-API: re-import till en plattform</h2>
+<p>Samma fångade token kan också <b>skriva</b>. Vi byggde en PoC-importer som läser arkivet ur
+SQLite och skriver in en hel community (trådar + svar, kronologiskt) i ett nytt, privat
+test-community - för att utvärdera om innehållet kan "leva vidare" i en målplattform.</p>
+<table>
+  <thead><tr><th>Operation</th><th>Endpoint</th><th>Notis</th></tr></thead>
+  <tbody>
+    <tr><td>Skapa privat community</td><td><span class="tag post">POST</span> <code>groups.json</code></td><td><code>name</code>, <code>private=true</code>, <code>show_in_directory=false</code> =&gt; <code>201</code></td></tr>
+    <tr><td>Skapa inlägg / svar</td><td><span class="tag post">POST</span> <code>messages.json</code></td><td>form-encoded: <code>body</code>, <code>group_id</code> (trådstart), <code>replied_to_id</code> (svar). Returnerar nya meddelandet.</td></tr>
+    <tr><td>Radera (teardown)</td><td><span class="tag post">DELETE</span> <code>messages/{id}.json</code>, <code>groups/{id}.json</code></td><td>Gör PoC:n helt återställbar.</td></tr>
+  </tbody>
+</table>
+<div class="callout warn"><b>Två hårda begränsningar i REST (Microsoft Learn):</b>
+<ul style="margin:.4rem 0 0">
+  <li><b>Ingen backdatering</b> - <code>created_at</code>/<code>published_at</code> stöds inte; allt får nutidsstämpel.</li>
+  <li><b>Ingen redigering</b> - inget PUT/PATCH för meddelanden. Bara skapa/läsa/svara/radera.</li>
+</ul>
+Författare, tid och reaktioner går alltså inte att återskapa som riktiga objekt - de bäddas in i
+<b>texten</b> (prefix "Ursprungligen av X · datum" + sidfot med reaktioner/sett-av). Och eftersom
+text inte kan redigeras efteråt måste interna länkar lösas <b>vid skapandet</b>: kronologisk
+postning löser bakåtlänkar, övriga pekas mot läs-arkivet.</div>
+<div class="callout"><b>Identitet:</b> token = en riktig persons session, så inläggen postas under
+<em>hens</em> namn med nutidsstämpel - inte ett neutralt "arkiv-konto". Privat enmans-community =&gt;
+inga notiser till andra. Mentions renderas som <b>text</b> (<code>@Namn</code>), aldrig riktiga
+taggar, så ingen aviseras.</div>
+<h3>Skriv-rate-limit: adaptiv throttle</h3>
+<p>Skrivtakten är hårdare begränsad än läs (Graphs Viva-API anger ~10 req/30s). I stället för en
+fast gissning använder importern en <b>adaptiv AIMD-throttle</b>: minskar intervallet vid varje
+lyckad skrivning (mot golv 0,8s), ökar det multiplikativt vid <code>429</code> (mot tak 15s) och
+respekterar <code>Retry-After</code>. Empiriskt: 218 POST gick på 0,8s utan en enda 429, medan en
+DELETE-svep slog i gränsen och throttlen backade av och återhämtade automatiskt.</p>
+
+<h2 id="nesting">Nästlade svar (reply-to-a-reply)</h2>
+<p>Legacy REST <code>replied_to_id</code> <b>plattar</b> alla svar till trådnivå - även om man pekar på
+ett djupt svar hamnar allt på toppnivå. Äkta nästling skapas i stället via GraphQL-mutationen
+<code>PublishReplyMessageClients</code> (samma APQ-mekanism som läs-querysen).</p>
+<pre><code>POST https://engage.cloud.microsoft/graphql?operationName=PublishReplyMessageClients
+{
+  "operationName": "PublishReplyMessageClients",
+  "variables": {
+    "serializedContentState": "{\"blocks\":[{\"text\":\"...\",\"type\":\"unstyled\",...}],\"entityMap\":{}}",
+    "replyToMessageMutationId": gid("Message", &lt;förälderns id&gt;),   // trådstart ELLER ett svar
+    "isSecondLevelReply": false,   // true om föräldern är ett svar (inte trådstarten)
+    "notifiedUserIds": [], "attachmentIds": [], "clientMutationId": "&lt;uuid&gt;", ...
+  },
+  "extensions": { "persistedQuery": { "version": 1, "sha256Hash": "85a613b9...0364" } }
+}
+// svar: data.replyMessage.message.id = nya meddelandets gid (parentMessage.id = föräldern)
+</code></pre>
+<ul>
+  <li><b><code>replyToMessageMutationId</code></b> pekar på den direkta föräldern - back-end bevarar
+      hela förälderkedjan, <b>godtyckligt djup</b>.</li>
+  <li><b><code>isSecondLevelReply</code></b> är en boolean: <code>false</code> = svar på trådstarten,
+      <code>true</code> = svar på ett svar. Ingen "nivå 3"-flagga finns.</li>
+  <li><b><code>serializedContentState</code></b> = webbklientens DraftJS-format (JSON-sträng, ett block
+      per rad). För ren text räcker block utan entities.</li>
+</ul>
+<div class="callout"><b>UI vs back-end:</b> Viva renderar bara <b>2 visuella indragsnivåer</b>. Svar på
+nivå 3+ läggs visuellt på nivå 2, och djupet disambigueras med en inledande <code>@Namn</code>-text i
+svaret (inte ett citat). Back-end-relationen (<code>replyTo</code>) är dock exakt, så importen länkar
+varje svar till sin sanna förälder oavsett djup.</div>
+<div class="callout warn"><b>Fallgrop:</b> mutationshashen dör vid app-deploy precis som läs-hasharna -
+nästlad import är ett <b>en-gångs-pass nära fångsten</b>. Trådstarten skapas via REST (ger ett
+numeriskt id =&gt; <code>gid("Message", id)</code>), svaren via mutationen.</div>
 
 <h2 id="pitfalls">Fallgropar &amp; insikter</h2>
 <h3>1. "Finns mer"-flaggor ljuger - paginera på resultat</h3>
@@ -268,7 +337,8 @@ messages_fts USING fts5(body_plain, content='messages', content_rowid='id')
 </ul>
 
 <footer>
-  Genererad ur viva-engage-rescue 2026-06-14. Siffror speglar arkivet vid genereringen.
+  Genererad ur viva-engage-rescue 2026-06-14, uppdaterad 2026-06-15 (skriv-API + nästling).
+  Siffror speglar arkivet vid genereringen.
   Self-contained: inga externa beroenden - öppna filen direkt i en webbläsare.
 </footer>
 </main>

@@ -24,6 +24,39 @@
       efter sista omkörningen så mest kompletta datan importeras), och sätt basic
       auth i Nginx Proxy Manager framför port 8051.
 
+## Re-import (PoC)
+- [x] **PoC: importera en community till ett privat test-community. KÖRT 2026-06-15.**
+      218/218 inlägg av TV-spelsgruppen (5673271296) importerade till test-gruppen
+      2104760211603456, 0 fel, 0 429:or. Adaptiva skriv-throttlen konvergerade direkt
+      till golvet 0,80 s/inlägg utan att rate-limitas -> faktisk skrivgräns ligger
+      under 0,8 s. ~3 min totalt. Nästling mappas (förälderns nya id, ej bara
+      trådstart); Viva plattar troligen djupa kedjor. KVAR: visuell verifiering +
+      `teardown 5673271296` när PoC:n är granskad. Skiss + verifierat skriv-API i
+      `import-verktyg-skiss.md` (§A/§B). `scraper/importer.py`: kommandon
+      `dry-run`/`smoke`/`run`/`teardown`; privat grupp via `POST groups.json`, inlägg
+      via `POST messages.json` (+`replied_to_id`), mentions som `@Namn`-text (ingen
+      avisering), författare/tid/reaktioner inbäddade i texten, interna länkar mot
+      läs-arkivet, id-map för resume. `yammer.post()/delete()` med 3 s skriv-intervall.
+      Verifierat: dry-run mot "TV-spelsgruppen" (5673271296, 47 trådar/218 inlägg) OK.
+      KÖRD live mot test-gruppen 2104760211603456 (Rasmus skapade den själv):
+      smoke -> run (218/218) -> clear. Skriv-throttlen är adaptiv (AIMD, golv 0,8 s);
+      DELETE slog i 429 (~10/30 s) men återhämtade. Posterna hamnar under den
+      inloggades namn (personlig token), inte ett arkiv-konto.
+- [x] **Äkta nästling löst via GraphQL (2026-06-15).** Legacy REST `replied_to_id`
+      plattar alla svar till trådnivå. Webbklienten nästlar via mutationen
+      `PublishReplyMessageClients` (hash i graphql.HASHES): `replyToMessageMutationId`
+      = förälderns gid, `isSecondLevelReply` = förälder är ett svar. Back-end bevarar
+      hela kedjan (djup obegränsat); UI visar 2 indrag + `@Namn`-text för djupare
+      (Claude-for-Chrome-verifierat). Implementerat: `_post_reply_gql()` +
+      `_content_state()` (DraftJS) + `smoke-nested`. Nästlat läge är DEFAULT i `run`
+      (opt-out via `--flat`). Verifierat via smoke-nested (nivå 1/2/3) + full nästlad
+      import (218/218). Detaljer i import-verktyg-skiss.md §C. Mutationshash dör vid
+      app-deploy som övriga -> en-gångs-pass nära fångsten.
+- [ ] **Frontend för importen.** Bygg ett UI för import-flödet (i admin-panelen,
+      app/main.py) i stället för CLI: välj källcommunity + målgrupp, dry-run-förhandsvisning,
+      smoke/smoke-nested-knappar, kör (med/utan --nested), live-progress (som övriga pass),
+      samt clear/teardown. Statusläsare + LOGS/_COMMANDS som för dump/enrich.
+
 ## Dokumentation / kunskapsdelning
 - [x] **Self-contained HTML-rapport om API:erna vi använt (2026-06-14).** Skapad:
       `viva-api-rapport.html` (~19 KB, inline CSS, inga externa beroenden, sticky
@@ -67,6 +100,13 @@ storylines, community-info, profiler, avatarer, bilagor). Kvar:
       (config.selected_groups()) i dump/threads/download/enrich + multiselect i
       panelen ("Begränsa till vissa communities") som skickar ?groups= till
       /start. Tomt = alla. (2026-06-10)
+- [ ] **Exkludera grupper ur exporten (motsats till --groups).** Den vanliga
+      arkivexporten ska INTE dra in PoC-/arkiv-grupperna vi själva skapat i nätverket
+      - just nu `test-ve-export-import` (id 2104760211603456), och framöver ev.
+      `[Arkiv] ...`-grupper från importen. Annars förorenar våra egna re-importerade
+      inlägg arkivet (cirkulärt). Bygg en exkluderingslista: `--exclude id1,id2`
+      (config) som dump/threads/community_info/users hoppar, + motsvarande
+      multiselect i panelen. Default-exkludera test-gruppens id.
 - [x] **Arkiv-UX: datum, sökfilter, översikt.** Svensk lokaltid (svtid-filter);
       sök filtrerbart på community/avsändare/datumintervall (+ filter-only
       bläddring, säker snippet); översiktssida (/arkiv/oversikt) med totaler,
@@ -122,6 +162,22 @@ storylines, community-info, profiler, avatarer, bilagor). Kvar:
       Sluttillståndet fångas däremot genom att köra hela pipelinen en sista gång
       så nära nedstängningen som möjligt (bygget dedupar på id och tar senaste
       rådata). (Rasmus 2026-06-09)
+- [~] **Upvotes + bästa svar (frågetrådar). BYGGT 2026-06-14, backfill kvarstår.**
+      enrich fångar nu `featuredQuestionReplyUpvotes` (antal + upvoters) och trådens
+      `bestReply`/`verifiedReply`; build fyller tabellerna `upvotes`/`upvoters` +
+      kolumnerna `thread_meta.best_reply_id`/`verified_reply_id`; trådvyn visar
+      "✓ Bästa svar"/"✓ Verifierat svar"-badge + ⬆-antal. Verifierat på en tråd.
+      KVAR ATT KÖRA: backfilla historiken - enrich hoppar `.done`-trådar, så kör
+      **`uv run python -m scraper.enrich --force`** (ny flagga som ignorerar `.done`)
+      och därefter **bygg om arkivet**. Tung GraphQL-omhämtning (~8 900 trådar,
+      timmar) - kör nära fångsten/efter pågående avatarhämtning, inte samtidigt
+      (delad token/rate-limit). Obs: pipelinens vanliga enrich-steg forcar INTE.
+- [ ] **Omröstningsresultat (poll-röster).** Legacy-API:t ger bara alternativen
+      (`poll_options`: option+answer), INGA röstsiffror eller vem som röstat -
+      lagras redan i tabellen `polls`. Röstresultaten saknas. Behöver utredas om
+      moderna GraphQL har en poll-results-query (fånga hash via Claude-for-Chrome,
+      som MessageReactions/storyline-flödet). Lågt prioriterat: bara 17 omröstningar
+      i hela arkivet.
 
 ## Strukturera befintlig rådata (ingen ny hämtning)
 - [x] **Community-vyn visar inläggstyp.** Fråga/📣 Meddelande/Omröstning-badge +

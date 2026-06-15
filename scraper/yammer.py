@@ -6,14 +6,23 @@ import requests
 
 from . import config
 
-# Legacy-API:t tål grovt 10 req/10s. 1.2s mellan anrop ger marginal.
+# Legacy-API:t tål grovt 10 req/10s. 1.2s mellan anrop ger marginal vid läs.
 _MIN_INTERVAL = 1.2
 _last_call = 0.0
 
+# Skriv-throttle (POST/DELETE): adaptiv AIMD som söker sig till rätt takt i stället
+# för en fast konservativ gissning. Additiv minskning vid varje lyckad skrivning,
+# multiplikativ ökning vid 429. Startar måttligt och justeras live.
+_WRITE_MIN = 0.8       # golv - gå aldrig snabbare än så
+_WRITE_MAX = 15.0      # tak - backa aldrig långsammare än så
+_WRITE_DEC = 0.1       # minska intervallet så mycket per lyckad skrivning
+_WRITE_INC = 1.7       # multiplicera intervallet med detta vid 429
+_write_interval = 1.5  # aktuellt skriv-intervall (muteras under körning)
 
-def _throttle() -> None:
+
+def _throttle(interval: float = _MIN_INTERVAL) -> None:
     global _last_call
-    wait = _MIN_INTERVAL - (time.monotonic() - _last_call)
+    wait = interval - (time.monotonic() - _last_call)
     if wait > 0:
         time.sleep(wait)
     _last_call = time.monotonic()
@@ -35,14 +44,19 @@ _TRANSIENT = (
 )
 
 
-def _request(url: str, **params) -> requests.Response:
-    """Gör en GET med självläkande token: läser token färskt per anrop och
+def _request(url: str, method: str = "GET", data: dict | None = None,
+             interval: float = _MIN_INTERVAL, adaptive: bool = False,
+             **params) -> requests.Response:
+    """Gör ett anrop med självläkande token: läser token färskt per anrop och
     väntar in en ny (inklistrad i panelen) vid 401 i stället för att krascha.
-    Backar av vid 429/nätverksfel."""
+    Backar av vid 429/nätverksfel. `method` GET/POST/DELETE; `data` form-encodas
+    för POST. Läsningar throttlas på fast `interval`; skrivningar (`adaptive=True`)
+    använder den globala adaptiva skriv-throttlen (AIMD)."""
+    global _write_interval
     net_fails = 0
     server_fails = 0
     while True:
-        _throttle()
+        _throttle(_write_interval if adaptive else interval)
         tok = config.current_token()
         if not tok:
             print("  ingen token satt - väntar (klistra in i panelen)...")
@@ -50,8 +64,9 @@ def _request(url: str, **params) -> requests.Response:
                 continue
             raise TokenExpired("ingen token tillgänglig inom tidsgräns")
         try:
-            resp = requests.get(url, headers={"Authorization": f"Bearer {tok}"},
-                                params=params, timeout=60)
+            resp = requests.request(
+                method, url, headers={"Authorization": f"Bearer {tok}"},
+                params=params, data=data, timeout=60)
         except _TRANSIENT as e:
             net_fails += 1
             if net_fails > 6:
@@ -69,7 +84,12 @@ def _request(url: str, **params) -> requests.Response:
             raise TokenExpired("401, ingen ny token inom tidsgräns")
         if resp.status_code == 429:
             retry = int(resp.headers.get("Retry-After", 10))
-            print(f"  429 rate limit - väntar {retry}s")
+            if adaptive:  # för snabb takt -> öka intervallet multiplikativt
+                _write_interval = min(_write_interval * _WRITE_INC, _WRITE_MAX)
+                print(f"  429 rate limit - väntar {retry}s, höjer skriv-intervall "
+                      f"-> {_write_interval:.2f}s")
+            else:
+                print(f"  429 rate limit - väntar {retry}s")
             time.sleep(retry)
             continue
         if resp.status_code in (500, 502, 503, 504):
@@ -80,6 +100,8 @@ def _request(url: str, **params) -> requests.Response:
             print(f"  {resp.status_code} serverfel - nytt försök om {wait}s")
             time.sleep(wait)
             continue
+        if adaptive and resp.ok:  # lyckad skrivning -> nudgea takten nedåt mot golvet
+            _write_interval = max(_write_interval - _WRITE_DEC, _WRITE_MIN)
         return resp
 
 
@@ -90,6 +112,26 @@ def get(path: str, **params) -> dict | list:
         raise Forbidden(f"{resp.status_code} på {path}")
     resp.raise_for_status()
     return resp.json()
+
+
+def post(path: str, **data) -> dict:
+    """POST (form-encoded) mot API:t med självläkande token + skriv-throttle.
+    Returnerar svaret som dict. Höjer Forbidden vid 403/404."""
+    resp = _request(f"{config.YAMMER_API_BASE}/{path.lstrip('/')}",
+                    method="POST", data=data, adaptive=True)
+    if resp.status_code in (403, 404):
+        raise Forbidden(f"{resp.status_code} på POST {path}: {resp.text[:200]}")
+    resp.raise_for_status()
+    return resp.json() if resp.content else {}
+
+
+def delete(path: str) -> None:
+    """DELETE mot API:t (för teardown av PoC-community/inlägg). Självläkande token."""
+    resp = _request(f"{config.YAMMER_API_BASE}/{path.lstrip('/')}",
+                    method="DELETE", adaptive=True)
+    if resp.status_code in (403, 404):
+        raise Forbidden(f"{resp.status_code} på DELETE {path}")
+    resp.raise_for_status()
 
 
 def _paginate_groups(**extra) -> list[dict]:
