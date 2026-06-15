@@ -103,7 +103,8 @@ storylines, community-info, profiler, avatarer, bilagor). Kvar:
       meddelande-loopen (belt-and-suspenders). Våra fyra test-grupper ligger i
       `EXCLUDE_GROUPS` i .env. Bekräftat: en `--update`-körning drog in test-grupperna,
       och efter exclude + ombyggnad är de borta (riktiga org-test-communities kvar).
-      KVAR (valfritt): multiselect i panelen för exclude.
+      Panel-UI: kortet "Exkluderade communities" (kryssrutor) skriver EXCLUDE_GROUPS
+      till .env via /api/exclude.
 - [x] **Arkiv-UX: datum, sökfilter, översikt.** Svensk lokaltid (svtid-filter);
       sök filtrerbart på community/avsändare/datumintervall (+ filter-only
       bläddring, säker snippet); översiktssida (/arkiv/oversikt) med totaler,
