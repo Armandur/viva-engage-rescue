@@ -52,9 +52,12 @@ CREATE TABLE attachments (
 );
 CREATE TABLE mentions (message_id INTEGER, user_id INTEGER);
 CREATE TABLE likes (message_id INTEGER, user_id INTEGER);
-CREATE TABLE thread_meta (thread_id INTEGER PRIMARY KEY, seen_by_count INTEGER);
+CREATE TABLE thread_meta (thread_id INTEGER PRIMARY KEY, seen_by_count INTEGER,
+    best_reply_id INTEGER, verified_reply_id INTEGER);
 CREATE TABLE reactions (message_id INTEGER, type TEXT, count INTEGER);
 CREATE TABLE reactors (message_id INTEGER, type TEXT, user_id INTEGER);
+CREATE TABLE upvotes (message_id INTEGER, count INTEGER);
+CREATE TABLE upvoters (message_id INTEGER, user_id INTEGER);
 CREATE INDEX idx_messages_group ON messages(group_id);
 CREATE INDEX idx_messages_thread ON messages(thread_id);
 CREATE INDEX idx_attachments_msg ON attachments(message_id);
@@ -62,6 +65,7 @@ CREATE INDEX idx_mentions_msg ON mentions(message_id);
 CREATE INDEX idx_likes_msg ON likes(message_id);
 CREATE INDEX idx_reactions_msg ON reactions(message_id);
 CREATE INDEX idx_reactors_msg ON reactors(message_id);
+CREATE INDEX idx_upvotes_msg ON upvotes(message_id);
 CREATE INDEX idx_pinned_group ON pinned(group_id);
 CREATE INDEX idx_members_group ON group_members(group_id);
 CREATE VIRTUAL TABLE messages_fts USING fts5(body_plain, content='messages', content_rowid='id');
@@ -176,13 +180,15 @@ def main() -> None:
 
     # Berikning (reaktioner + seen) från GraphQL-passet, om det körts.
     # Reaktor-användare som inte fanns i v1-datan läggs till minimalt.
-    thread_meta, reactions, reactors = {}, [], []
+    thread_meta, reactions, reactors, upvotes, upvoters = {}, [], [], [], []
     if RXN.exists():
         for f in RXN.glob("*.json"):
             d = json.loads(f.read_text(encoding="utf-8"))
             tid = d["thread_id"]
-            if d.get("seen_by_count") is not None:
-                thread_meta[tid] = (tid, d["seen_by_count"])
+            if (d.get("seen_by_count") is not None or d.get("best_reply_id")
+                    or d.get("verified_reply_id")):
+                thread_meta[tid] = (tid, d.get("seen_by_count"),
+                                    d.get("best_reply_id"), d.get("verified_reply_id"))
             for mid_s, rec in d.get("messages", {}).items():
                 mid = int(mid_s)
                 for typ, cnt in (rec.get("reactions") or {}).items():
@@ -190,6 +196,11 @@ def main() -> None:
                 for typ, uids in (rec.get("reactors") or {}).items():
                     for uid in uids:
                         reactors.append((mid, typ, int(uid)))
+                uv = rec.get("upvotes") or {}
+                if uv.get("count"):
+                    upvotes.append((mid, uv["count"]))
+                    for uid in (uv.get("upvoters") or []):
+                        upvoters.append((mid, int(uid)))
             for uid_s, info in (d.get("users") or {}).items():
                 uid = int(uid_s)
                 if uid not in users:
@@ -261,9 +272,11 @@ def main() -> None:
             "raw_json=? WHERE id=?", rows)
         nprof = len(rows)
 
-    con.executemany("INSERT INTO thread_meta VALUES (?,?)", thread_meta.values())
+    con.executemany("INSERT INTO thread_meta VALUES (?,?,?,?)", thread_meta.values())
     con.executemany("INSERT INTO reactions VALUES (?,?,?)", reactions)
     con.executemany("INSERT INTO reactors VALUES (?,?,?)", reactors)
+    con.executemany("INSERT INTO upvotes VALUES (?,?)", upvotes)
+    con.executemany("INSERT INTO upvoters VALUES (?,?)", upvoters)
 
     con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
     con.execute("UPDATE communities SET message_count = "

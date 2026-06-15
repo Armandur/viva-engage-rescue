@@ -43,6 +43,8 @@
     {% if m["message_type"] in ["question", "announcement", "poll", "system"] %}
       <div class="mt-1">{{ typebadge(m["message_type"]) }}</div>
     {% endif %}
+    {% if m["id"] == best_reply_id %}<div class="mt-1"><span class="badge text-bg-success">✓ Bästa svar</span></div>
+    {% elif m["id"] == verified_reply_id %}<div class="mt-1"><span class="badge text-bg-success">✓ Verifierat svar</span></div>{% endif %}
     {% if m["title"] %}
       <div class="fw-semibold {% if m['message_type'] in ['question', 'announcement'] %}fs-5{% endif %}">{{ m["title"] }}</div>
     {% endif %}
@@ -62,6 +64,9 @@
     {% endif %}
     {% if mentions.get(m["id"]) %}
       <div class="small text-secondary">Även aviserade: {{ userlinks(mentions[m["id"]]) }}</div>
+    {% endif %}
+    {% if upvotes.get(m["id"]) %}
+      <div class="mt-1"><span class="badge rounded-pill text-bg-light border fw-normal" title="Upproströstningar">⬆ {{ upvotes[m["id"]] }}</span></div>
     {% endif %}
     {% if reactions.get(m["id"]) %}
       <div class="mt-1 d-flex flex-wrap gap-1">

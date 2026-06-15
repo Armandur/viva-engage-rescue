@@ -614,9 +614,16 @@ def thread(request: Request, thread_id: int):
         "LEFT JOIN users u ON u.id = rc.user_id WHERE m.thread_id = ?", (thread_id,)
     ):
         reactors.setdefault(r["mid"], {}).setdefault(r["type"], []).append(r["name"])
+    upvotes = {r["message_id"]: r["count"] for r in con.execute(
+        "SELECT uv.message_id, uv.count FROM upvotes uv "
+        "JOIN messages m ON m.id = uv.message_id WHERE m.thread_id = ?", (thread_id,)
+    )}
     seen_row = con.execute(
-        "SELECT seen_by_count FROM thread_meta WHERE thread_id = ?", (thread_id,)
+        "SELECT seen_by_count, best_reply_id, verified_reply_id "
+        "FROM thread_meta WHERE thread_id = ?", (thread_id,)
     ).fetchone()
+    best_reply_id = seen_row["best_reply_id"] if seen_row else None
+    verified_reply_id = seen_row["verified_reply_id"] if seen_row else None
     seen_count = seen_row["seen_by_count"] if seen_row else None
 
     # Delade inlägg (reshares): hämta originalets tråd + text + avsändare så vi
@@ -666,6 +673,8 @@ def thread(request: Request, thread_id: int):
         "mentions": mentions, "likes": likes,
         "polls": polls, "shared_links": shared_links, "shared_posts": shared_posts,
         "reactions": reactions, "reactors": reactors, "seen_count": seen_count,
+        "upvotes": upvotes, "best_reply_id": best_reply_id,
+        "verified_reply_id": verified_reply_id,
         "emoji": REACTION_EMOJI, "rlabel": REACTION_LABEL,
     })
 

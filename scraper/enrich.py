@@ -16,6 +16,7 @@ Kör: uv run python -m scraper.enrich
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from . import config
@@ -87,9 +88,27 @@ def _parse_msg(node: dict) -> tuple[str, dict, dict]:
                           "job_title": u.get("jobTitle")}
         if ids:
             reactors[typ] = ids
+    # Upvotes (frågetrådar): totalCount = fullt antal, edges = urval av upvoters.
+    up = node.get("featuredQuestionReplyUpvotes") or {}
+    up_count = up.get("totalCount") or 0
+    up_ids = []
+    for e in up.get("edges", []):
+        u = e.get("node") or {}
+        try:
+            uid = int(gq.gid_decode(u["id"]))
+        except Exception:
+            uid = u.get("databaseId")
+        if uid is None:
+            continue
+        uid = int(uid)
+        up_ids.append(uid)
+        users.setdefault(uid, {"name": u.get("displayName"), "email": u.get("email"),
+                               "job_title": u.get("jobTitle")})
     rec = {"reactions": reactions}
     if reactors:
         rec["reactors"] = reactors
+    if up_count:
+        rec["upvotes"] = {"count": up_count, "upvoters": up_ids}
     return mid, rec, users
 
 
@@ -114,6 +133,18 @@ def _chase_second(tid: int, parent_mid: str, parent_cursor: str, take) -> None:
         before = pi["startCursor"]
 
 
+def _reply_id(wrapper: dict | None) -> int | None:
+    """Meddelande-id ur trådens bestReply/verifiedReply ({markedBy, message, ...})."""
+    msg = (wrapper or {}).get("message") or {}
+    if msg.get("id"):
+        try:
+            return int(gq.gid_decode(msg["id"]))
+        except Exception:
+            pass
+    tid = msg.get("telemetryId") or msg.get("databaseId")
+    return int(tid) if tid else None
+
+
 def _enrich_thread(tid: int, expected: set[str]) -> dict:
     out_msgs: dict[str, dict] = {}
     users: dict[int, dict] = {}
@@ -127,6 +158,8 @@ def _enrich_thread(tid: int, expected: set[str]) -> dict:
 
     th = gq.query("NestedThreadClients", _ntc_vars(tid))["thread"]
     seen = th.get("seenByCount")
+    best = _reply_id(th.get("bestReply"))
+    verified = _reply_id(th.get("verifiedReply"))
     if th.get("threadStarter"):
         take(th["threadStarter"])
     tl = th.get("topLevelReplies") or {}
@@ -149,6 +182,7 @@ def _enrich_thread(tid: int, expected: set[str]) -> dict:
                 break
 
     return {"thread_id": int(tid), "seen_by_count": seen,
+            "best_reply_id": best, "verified_reply_id": verified,
             "messages": out_msgs, "users": users}
 
 
@@ -172,11 +206,17 @@ def main() -> None:
         expected.setdefault(tid, set()).add(str(mid))
     con.close()
 
+    # --force: kör om alla trådar trots .done (för att backfilla nya fält som
+    # upvotes/bästa-svar i redan berikade trådar). Annars resume via .done.
+    force = "--force" in sys.argv
+    if force:
+        print("--force: kör om även redan berikade trådar (.done ignoreras).")
+
     total = len(threads)
     done = newly = skipped = 0
     pq_streak = 0  # PersistedQueryGone i rad -> trolig app-deploy, avbryt då
     for i, tid in enumerate(threads, 1):
-        if (RAW / f"{tid}.done").exists():
+        if not force and (RAW / f"{tid}.done").exists():
             done += 1
             continue
         try:
