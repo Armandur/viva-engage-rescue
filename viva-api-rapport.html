@@ -220,7 +220,7 @@ test-community - för att utvärdera om innehållet kan "leva vidare" i en målp
 <table>
   <thead><tr><th>Operation</th><th>Endpoint</th><th>Notis</th></tr></thead>
   <tbody>
-    <tr><td>Skapa privat community</td><td><span class="tag post">MUTATION</span> <code>CreateGroupClients</code> (GraphQL)</td><td>Legacy <code>groups.json</code> är <b>blockerat</b> (403). GraphQL-mutationen funkar med sessionstoken: <code>displayName</code> (inga hakparenteser), <code>isPrivate</code>, <code>isUnlisted</code> =&gt; <code>data.createGroup.group.telemetryId</code>. (Alt: Graph <code>POST /employeeExperience/communities</code>, kräver Entra-app.)</td></tr>
+    <tr><td>Skapa privat community</td><td><span class="tag post">MUTATION</span> <code>CreateGroupClients</code> (GraphQL)</td><td>Legacy <code>groups.json</code> är <b>blockerat</b> (403). GraphQL-mutationen funkar med sessionstoken: <code>displayName</code> (inga hakparenteser -&gt; <code>INVALID_DISPLAY_NAME</code>), <code>isPrivate</code>, <code>isUnlisted</code> =&gt; <code>data.createGroup.group.telemetryId</code>. (Alt: Graph <code>POST /employeeExperience/communities</code>, kräver Entra-app.)</td></tr>
     <tr><td>Skapa inlägg / svar</td><td><span class="tag post">POST</span> <code>messages.json</code></td><td>form-encoded: <code>body</code>, <code>group_id</code> (trådstart), <code>replied_to_id</code> (svar). Returnerar nya meddelandet.</td></tr>
     <tr><td>Radera (teardown)</td><td><span class="tag post">DELETE</span> <code>messages/{id}.json</code>, <code>groups/{id}.json</code></td><td>Gör PoC:n helt återställbar.</td></tr>
   </tbody>
