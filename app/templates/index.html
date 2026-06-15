@@ -115,6 +115,35 @@
 
   <div class="card mb-3">
     <div class="card-body">
+      <h2 class="h6">Exkluderade communities (utanför exporten)</h2>
+      <p class="small text-secondary mb-2">
+        Bockade communities hoppas av dump och build (t.ex. egna test-/arkiv-grupper vi
+        skapat i nätverket). Sparas i .env (EXCLUDE_GROUPS) och gäller nästa körning.
+      </p>
+      <form id="exclude-form" onsubmit="return saveExclude(event)">
+        <div class="border rounded p-2 small" style="max-height:14rem; overflow:auto">
+          {% for c in archived_communities %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="exc" value="{{ c.id }}" id="exc{{ c.id }}"
+                   {% if c.id in excluded_groups %}checked{% endif %}>
+            <label class="form-check-label" for="exc{{ c.id }}">{{ c.full_name }} ({{ c.count }})</label>
+          </div>
+          {% endfor %}
+          {% for eid in extra_excluded %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="exc" value="{{ eid }}" id="exc{{ eid }}" checked>
+            <label class="form-check-label text-secondary" for="exc{{ eid }}">id {{ eid }} (ej i arkivet)</label>
+          </div>
+          {% endfor %}
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-2" type="submit">Spara exkludering</button>
+        <span id="exclude-status" class="small text-secondary ms-2"></span>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
       <h2 class="h6">Logg</h2>
       <pre id="log" class="mb-0">-</pre>
     </div>
@@ -164,6 +193,20 @@ function startImport(cmd) {
   }
   form.action = `/start_import/${cmd}`;
   form.submit();
+}
+function saveExclude(ev) {
+  ev.preventDefault();
+  const ids = [...document.querySelectorAll("#exclude-form input[name=exc]:checked")].map(c => c.value);
+  const status = document.getElementById("exclude-status");
+  status.textContent = "Sparar…";
+  fetch("/api/exclude", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "ids=" + encodeURIComponent(ids.join(",")),
+  }).then(r => r.json()).then(d => {
+    status.textContent = `Sparat: ${d.excluded.length} exkluderade (gäller nästa dump/build).`;
+  }).catch(() => { status.textContent = "Fel vid sparning."; });
+  return false;
 }
 let _pickerOpen = false;
 function renderGroupPicker(rows, running) {

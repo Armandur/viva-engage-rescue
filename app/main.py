@@ -680,10 +680,23 @@ def _log_tail(kind: str, n: int = 25) -> str:
 
 # ---- routes ----
 
+def _excluded_ids() -> set[int]:
+    """Grupp-id i EXCLUDE_GROUPS (.env) - grupper som hålls utanför dump/build."""
+    raw = _read_env().get("EXCLUDE_GROUPS", "")
+    return {int(x) for x in raw.split(",") if x.strip().lstrip("-").isdigit()}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
+    comms = _archived_communities()
+    exc = _excluded_ids()
+    arch_ids = {c["id"] for c in comms}
     return templates.TemplateResponse(request, "index.html", {
-        "archived_communities": _archived_communities()
+        "archived_communities": comms,
+        "excluded_groups": exc,
+        # Exkluderade id som inte finns i arkivet (t.ex. redan exkluderade test-grupper)
+        # - visas ändå så de går att bocka ur.
+        "extra_excluded": sorted(exc - arch_ids),
     })
 
 
@@ -779,6 +792,20 @@ def start_import(cmd: str, source: int = Form(...), target: str = Form(""), flat
         encoding="utf-8",
     )
     return RedirectResponse("/", status_code=302)
+
+
+@app.post("/api/exclude")
+def set_exclude(ids: str = Form("")):
+    """Sparar EXCLUDE_GROUPS i .env (grupper som hålls utanför dump/build)."""
+    clean = sorted({int(x) for x in ids.split(",") if x.strip().lstrip("-").isdigit()})
+    env = _read_env()
+    if clean:
+        env["EXCLUDE_GROUPS"] = ",".join(str(i) for i in clean)
+    else:
+        env.pop("EXCLUDE_GROUPS", None)
+    env.setdefault("YAMMER_API_BASE", "https://www.yammer.com/api/v1")
+    ENV.write_text("".join(f"{k}={v}\n" for k, v in env.items()), encoding="utf-8")
+    return {"ok": True, "excluded": clean}
 
 
 @app.post("/stop")
